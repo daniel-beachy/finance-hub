@@ -1,0 +1,28 @@
+{
+  "name": "finance-hub",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "fh": "node packages/server/bin/fh.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p packages/core && tsc -p packages/core/tsconfig.test.json && tsc -p packages/server && tsc -p packages/web",
+    "lint": "biome lint packages",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "dev": "npm run dev -w @finance-hub/web",
+    "build": "npm run build -w @finance-hub/web",
+    "serve": "node packages/server/bin/fh.js serve",
+    "prepare": "git config core.hooksPath .githooks || true"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.6",
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

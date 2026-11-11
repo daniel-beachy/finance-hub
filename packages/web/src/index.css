@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-ink: light-dark(#16181d, #e9eaee);
+  --color-muted: light-dark(#5d6470, #9aa1ad);
+  --color-page: light-dark(#f6f6f4, #101216);
+  --color-panel: light-dark(#ffffff, #181b21);
+  --color-line: light-dark(#e2e2de, #2a2e37);
+  --color-accent: light-dark(#0f6b5c, #4fd1b5);
+  --color-warn: light-dark(#b42318, #ff8a7a);
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}

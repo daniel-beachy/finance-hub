@@ -1,0 +1,11 @@
+#!/bin/sh
+# Reject financial data files outside a fixtures/ folder. This repo is public.
+bad=$(git diff --cached --name-only --diff-filter=ACMR \
+  | grep -Ei '\.(csv|qfx|ofx|qif|db|sqlite)$' \
+  | grep -Ev '(^|/)fixtures/' \
+  | grep -Ev '^packages/web/public/demo\.sqlite$')
+if [ -n "$bad" ]; then
+  echo "pre-commit: refusing to commit data files outside fixtures/:" >&2
+  echo "$bad" >&2
+  exit 1
+fi

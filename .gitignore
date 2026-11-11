@@ -1,0 +1,18 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+.env*
+*.log
+
+# Financial data never belongs in this repo. Synthetic fixtures live under
+# a fixtures/ folder and are force-added.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+!packages/web/public/demo.sqlite
+*.csv
+*.qfx
+*.ofx
+*.qif

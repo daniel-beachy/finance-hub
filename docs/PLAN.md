@@ -662,6 +662,19 @@ Accepted when:
 | State tax for one state only | Building all states is large and unused. |
 | No automatic LLM runs yet | Dan wants reliability and cost measured first. |
 
+## 12. Build notes: what changed while building
+
+Corrections found during M0 and M1. Where these differ from the text above, these win.
+
+- **Link tokens depend on what is being linked.** An investment-only institution does not support Transactions, so one fixed product list fails there. Link takes a `kind`: `bank` requires `transactions` and adds `investments` where supported; `investment` requires `investments` and adds `transactions` where supported. The Accounts page has a button for each.
+- **`SqlDriver` has a fourth method, `exec`**, for multi-statement SQL (migrations, `VACUUM`).
+- **Migrations are TypeScript modules that export SQL strings**, not `.sql` files, so the same migrations run in Node, the browser and a Worker without a file system.
+- **`connections.plaid_env`** records which Plaid environment a connection belongs to. Only `production` connections count toward the 10 slots.
+- **`plaid_category_map` is keyed by `pfc_key`**: a detailed Plaid category, with the primary category as a fallback row. The seed map was written from memory of Plaid's taxonomy and must be checked against Plaid's published CSV in M4.
+- **Sandbox prepares transactions in the background.** The first sync right after a link often returns zero; the next one returns the history. M2 should expect the same from real institutions and not treat an empty first sync as a failure.
+- **`fh sandbox-link` and `fh sandbox-break`** exist for development: the first creates a Sandbox connection without the Link UI, the second forces `ITEM_LOGIN_REQUIRED`. Both refuse to run outside Sandbox.
+- **Plaid Link takes several seconds to appear** after the button is pressed. The page says so while it waits.
+
 ## When the plan is wrong
 
 - If a fact in section 2 has changed, or an acceptance criterion can't be met as written, stop and tell Dan what changed and what you'd do instead. Don't quietly pick a different approach.

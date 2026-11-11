@@ -1,0 +1,148 @@
+/**
+ * Plaid personal_finance_category to our category IDs.
+ *
+ * Keys are Plaid `detailed` values, plus one row per `primary` value used as
+ * the fallback when a detailed value is not listed (Plaid adds new ones).
+ * The detailed list follows Plaid's v1 taxonomy and was written from the
+ * published category names; check it against Plaid's taxonomy CSV when the
+ * categorizer is built (M4).
+ */
+export const PLAID_CATEGORY_MAP: Record<string, string> = {
+  // Primary fallbacks
+  INCOME: "income.other",
+  TRANSFER_IN: "transfers.internal",
+  TRANSFER_OUT: "transfers.internal",
+  LOAN_PAYMENTS: "transfers.loan-principal",
+  BANK_FEES: "financial.fees",
+  ENTERTAINMENT: "entertainment.events",
+  FOOD_AND_DRINK: "food.restaurants",
+  GENERAL_MERCHANDISE: "shopping.general",
+  HOME_IMPROVEMENT: "housing.maintenance",
+  MEDICAL: "health.medical",
+  PERSONAL_CARE: "personal.care",
+  GENERAL_SERVICES: "financial.services",
+  GOVERNMENT_AND_NON_PROFIT: "financial.taxes",
+  TRANSPORTATION: "transport.transit",
+  TRAVEL: "travel.activities",
+  RENT_AND_UTILITIES: "utilities.energy",
+
+  INCOME_DIVIDENDS: "income.dividends",
+  INCOME_INTEREST_EARNED: "income.interest",
+  INCOME_RETIREMENT_PENSION: "income.other",
+  INCOME_TAX_REFUND: "income.refunds",
+  INCOME_UNEMPLOYMENT: "income.other",
+  INCOME_WAGES: "income.paycheck",
+  INCOME_OTHER_INCOME: "income.other",
+
+  TRANSFER_IN_CASH_ADVANCES_AND_LOANS: "transfers.internal",
+  TRANSFER_IN_DEPOSIT: "income.other",
+  TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS: "transfers.investment",
+  TRANSFER_IN_SAVINGS: "transfers.internal",
+  TRANSFER_IN_ACCOUNT_TRANSFER: "transfers.internal",
+  TRANSFER_IN_OTHER_TRANSFER_IN: "transfers.internal",
+
+  TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS: "transfers.investment",
+  TRANSFER_OUT_SAVINGS: "transfers.internal",
+  TRANSFER_OUT_WITHDRAWAL: "shopping.general",
+  TRANSFER_OUT_ACCOUNT_TRANSFER: "transfers.internal",
+  TRANSFER_OUT_OTHER_TRANSFER_OUT: "transfers.internal",
+
+  LOAN_PAYMENTS_CAR_PAYMENT: "transport.car-payment",
+  LOAN_PAYMENTS_CREDIT_CARD_PAYMENT: "transfers.card-payment",
+  LOAN_PAYMENTS_PERSONAL_LOAN_PAYMENT: "transfers.loan-principal",
+  LOAN_PAYMENTS_MORTGAGE_PAYMENT: "housing.mortgage",
+  LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT: "personal.education",
+  LOAN_PAYMENTS_OTHER_PAYMENT: "transfers.loan-principal",
+
+  BANK_FEES_ATM_FEES: "financial.fees",
+  BANK_FEES_FOREIGN_TRANSACTION_FEES: "financial.fees",
+  BANK_FEES_INSUFFICIENT_FUNDS: "financial.fees",
+  BANK_FEES_INTEREST_CHARGE: "financial.interest",
+  BANK_FEES_OVERDRAFT_FEES: "financial.fees",
+  BANK_FEES_OTHER_BANK_FEES: "financial.fees",
+
+  ENTERTAINMENT_CASINOS_AND_GAMBLING: "entertainment.events",
+  ENTERTAINMENT_MUSIC_AND_AUDIO: "entertainment.streaming",
+  ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS: "entertainment.events",
+  ENTERTAINMENT_TV_AND_MOVIES: "entertainment.streaming",
+  ENTERTAINMENT_VIDEO_GAMES: "entertainment.games",
+  ENTERTAINMENT_OTHER_ENTERTAINMENT: "entertainment.events",
+
+  FOOD_AND_DRINK_BEER_WINE_AND_LIQUOR: "food.alcohol",
+  FOOD_AND_DRINK_COFFEE: "food.coffee",
+  FOOD_AND_DRINK_FAST_FOOD: "food.restaurants",
+  FOOD_AND_DRINK_GROCERIES: "food.groceries",
+  FOOD_AND_DRINK_RESTAURANT: "food.restaurants",
+  FOOD_AND_DRINK_VENDING_MACHINES: "food.restaurants",
+  FOOD_AND_DRINK_OTHER_FOOD_AND_DRINK: "food.restaurants",
+
+  GENERAL_MERCHANDISE_BOOKSTORES_AND_NEWSSTANDS: "entertainment.media",
+  GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES: "shopping.clothing",
+  GENERAL_MERCHANDISE_CONVENIENCE_STORES: "shopping.general",
+  GENERAL_MERCHANDISE_DEPARTMENT_STORES: "shopping.general",
+  GENERAL_MERCHANDISE_DISCOUNT_STORES: "shopping.general",
+  GENERAL_MERCHANDISE_ELECTRONICS: "shopping.electronics",
+  GENERAL_MERCHANDISE_GIFTS_AND_NOVELTIES: "shopping.gifts",
+  GENERAL_MERCHANDISE_OFFICE_SUPPLIES: "shopping.general",
+  GENERAL_MERCHANDISE_ONLINE_MARKETPLACES: "shopping.general",
+  GENERAL_MERCHANDISE_PET_SUPPLIES: "personal.pets",
+  GENERAL_MERCHANDISE_SPORTING_GOODS: "entertainment.hobbies",
+  GENERAL_MERCHANDISE_SUPERSTORES: "shopping.general",
+  GENERAL_MERCHANDISE_TOBACCO_AND_VAPE: "shopping.general",
+  GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE: "shopping.general",
+
+  HOME_IMPROVEMENT_FURNITURE: "housing.furnishings",
+  HOME_IMPROVEMENT_HARDWARE: "housing.maintenance",
+  HOME_IMPROVEMENT_REPAIR_AND_MAINTENANCE: "housing.maintenance",
+  HOME_IMPROVEMENT_SECURITY: "housing.maintenance",
+  HOME_IMPROVEMENT_OTHER_HOME_IMPROVEMENT: "housing.maintenance",
+
+  MEDICAL_DENTAL_CARE: "health.dental-vision",
+  MEDICAL_EYE_CARE: "health.dental-vision",
+  MEDICAL_NURSING_CARE: "health.medical",
+  MEDICAL_PHARMACIES_AND_SUPPLEMENTS: "health.pharmacy",
+  MEDICAL_PRIMARY_CARE: "health.medical",
+  MEDICAL_VETERINARY_SERVICES: "personal.pets",
+  MEDICAL_OTHER_MEDICAL: "health.medical",
+
+  PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS: "health.fitness",
+  PERSONAL_CARE_HAIR_AND_BEAUTY: "personal.care",
+  PERSONAL_CARE_LAUNDRY_AND_DRY_CLEANING: "personal.care",
+  PERSONAL_CARE_OTHER_PERSONAL_CARE: "personal.care",
+
+  GENERAL_SERVICES_ACCOUNTING_AND_FINANCIAL_PLANNING: "financial.services",
+  GENERAL_SERVICES_AUTOMOTIVE: "transport.maintenance",
+  GENERAL_SERVICES_CHILDCARE: "personal.childcare",
+  GENERAL_SERVICES_CONSULTING_AND_LEGAL: "financial.services",
+  GENERAL_SERVICES_EDUCATION: "personal.education",
+  GENERAL_SERVICES_INSURANCE: "financial.services",
+  GENERAL_SERVICES_POSTAGE_AND_SHIPPING: "shopping.general",
+  GENERAL_SERVICES_STORAGE: "housing.maintenance",
+  GENERAL_SERVICES_OTHER_GENERAL_SERVICES: "financial.services",
+
+  GOVERNMENT_AND_NON_PROFIT_DONATIONS: "personal.charity",
+  GOVERNMENT_AND_NON_PROFIT_GOVERNMENT_DEPARTMENTS_AND_AGENCIES: "financial.fees",
+  GOVERNMENT_AND_NON_PROFIT_TAX_PAYMENT: "financial.taxes",
+  GOVERNMENT_AND_NON_PROFIT_OTHER_GOVERNMENT_AND_NON_PROFIT: "financial.fees",
+
+  TRANSPORTATION_BIKES_AND_SCOOTERS: "transport.transit",
+  TRANSPORTATION_GAS: "transport.fuel",
+  TRANSPORTATION_PARKING: "transport.parking",
+  TRANSPORTATION_PUBLIC_TRANSIT: "transport.transit",
+  TRANSPORTATION_TAXIS_AND_RIDE_SHARES: "transport.transit",
+  TRANSPORTATION_TOLLS: "transport.parking",
+  TRANSPORTATION_OTHER_TRANSPORTATION: "transport.transit",
+
+  TRAVEL_FLIGHTS: "travel.flights",
+  TRAVEL_LODGING: "travel.lodging",
+  TRAVEL_RENTAL_CARS: "travel.rental-cars",
+  TRAVEL_OTHER_TRAVEL: "travel.activities",
+
+  RENT_AND_UTILITIES_GAS_AND_ELECTRICITY: "utilities.energy",
+  RENT_AND_UTILITIES_INTERNET_AND_CABLE: "utilities.internet",
+  RENT_AND_UTILITIES_RENT: "housing.rent",
+  RENT_AND_UTILITIES_SEWAGE_AND_WASTE_MANAGEMENT: "utilities.water",
+  RENT_AND_UTILITIES_TELEPHONE: "utilities.mobile",
+  RENT_AND_UTILITIES_WATER: "utilities.water",
+  RENT_AND_UTILITIES_OTHER_UTILITIES: "utilities.energy",
+};

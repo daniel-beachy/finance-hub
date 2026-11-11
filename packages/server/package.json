@@ -1,0 +1,12 @@
+{
+  "name": "@finance-hub/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "fh": "./bin/fh.js" },
+  "dependencies": {
+    "@finance-hub/core": "*",
+    "@hono/node-server": "^2.1.6",
+    "hono": "^4.13.17"
+  }
+}
