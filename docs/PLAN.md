@@ -19,6 +19,8 @@ A personal finance system that runs on Dan's Mac. It pulls every transaction and
 | LLM categorizing | Manual for now: a review queue Claude clears when Dan asks. Automatic runs are deferred until reliability and cost are measured. |
 | House advice | Buying first, then owner questions once there's a mortgage. |
 | Household | Dan only, with an owner on every account so a partner can be added later. |
+| Review | A Review section where Dan goes through large purchases and unfamiliar charges, says what they are, and flags fraud or mistakes. (Added 2026-11-10.) |
+| Backups | Everything fetched is kept: raw Plaid responses are archived, and the database and archive are copied to iCloud Drive's `Backups` folder. (Added 2026-11-10.) |
 | Repo | Public, `daniel-beachy/finance-hub`, with a demo mode for the portfolio. |
 
 ### Accounts in scope
@@ -127,12 +129,26 @@ The web client picks its transport from `import.meta.env.VITE_MODE` (`local` or 
 | Data directory | `~/Library/Application Support/finance-hub/`, overridable with `FH_DATA_DIR` |
 | Database | `<data>/finance.db` (WAL mode) |
 | Import inbox | `<data>/inbox/`, processed files move to `<data>/imported/` |
-| Backups | `<data>/backups/finance-YYYY-MM-DD.db`, 14 kept |
+| Raw archive | `<data>/raw/plaid/<connection id>/<UTC timestamp>-<endpoint>.json.gz`, append-only, never pruned |
+| Local backups | `<data>/backups/finance-YYYY-MM-DD.db`, 14 kept |
+| iCloud backups | `~/Library/Mobile Documents/com~apple~CloudDocs/Backups/finance-hub/` (`settings.backup_dir`): the same dated database copies, 30 daily plus the first of every month kept forever, and a mirror of `raw/` and `imported/` |
 | Logs | `<data>/logs/sync.log` |
-| Plaid credentials and access tokens | Keychain, service `finance-hub` |
+| Plaid credentials and access tokens | Keychain, service `finance-hub`. Accounts: `plaid-client-id`, `plaid-secret-sandbox`, `plaid-secret-production`, and `plaid-token-<connection id>` per connection |
 | Dev ports | Vite on 5201, API on 5202 (add to `~/AI_PROJECTS/.claude/launch.json`) |
 
-The data directory is deliberately outside iCloud and outside the repo. Disk encryption is FileVault's job; the database is not separately encrypted.
+The live data directory is deliberately outside iCloud and outside the repo, because iCloud can corrupt a SQLite file that's being written. Only finished, closed files are copied into the iCloud backup folder. Disk encryption is FileVault's job; the database is not separately encrypted. The iCloud copy means Dan's financial history is stored in his iCloud account, which he asked for.
+
+### Raw archive and backups
+
+Plaid gives history once, at link time, and a lost connection can't be re-linked without spending a slot. So nothing fetched is ever thrown away.
+
+- **Raw archive.** Every Plaid response that carries data (`/accounts/get`, each `/transactions/sync` page, `/investments/holdings/get`, `/investments/transactions/get`, `/item/get`) is written gzipped and unmodified to the raw archive **before** it's applied to the database. Files are append-only.
+- **Replay.** `fh replay` rebuilds accounts, balances, transactions, holdings and investment transactions in an empty database from the raw archive alone, applying files in timestamp order through the same code path as a live sync. Manual work (categories, rules, notes, budgets) is not in the archive; that's what the database backups are for.
+- **Imported files** are kept in `<data>/imported/` exactly as received.
+- **After every successful sync:** `VACUUM INTO` a dated local backup, then copy it and any new raw and imported files to the iCloud backup folder. A failed copy raises a `connection`-kind alert but doesn't fail the sync.
+- **`fh restore <file>`** replaces the database with a backup after confirming, and keeps the replaced file as `finance.db.before-restore`.
+- **`fh backup`** runs the backup step on demand.
+- Access tokens are not in any backup. They exist only in the Keychain, so a new Mac needs the Keychain items moved by hand. Say this in the README.
 
 ### Privacy rules for a public repo
 
@@ -206,6 +222,7 @@ Conventions:
 - `transfer_group_id`
 - `parent_id`, `is_split_parent` (splits: children carry the categories, the parent is excluded from sums)
 - `excluded`, `note`, `import_file_id`
+- `reviewed_at` (null until Dan or Claude has looked at it in Review), `review_reasons` JSON (why it was put in Review), `flag` (null, `suspicious`, `disputed`, `resolved`)
 - `created_at`, `updated_at`, `removed_at` (soft delete when Plaid sends `removed`)
 
 **`merchants`** `id`, `name`, `normalized_key` (unique), `plaid_entity_id`, `default_category_id`.
@@ -347,6 +364,17 @@ For each new or modified transaction, in order, stopping at the first that assig
 5. **Plaid category.** If `plaid_pfc_confidence` is `VERY_HIGH` or `HIGH`, use `plaid_category_map`.
 6. **Review queue.** Otherwise set the category to Uncategorized and `needs_review = 1`.
 
+**What lands in Review.** After categorizing, a transaction is put in Review, with `review_reasons` set, if any of these hold. Thresholds are in `settings`.
+
+- `uncategorized`: step 6 above.
+- `large`: an outflow of at least `review_large_cents` (default $200).
+- `unfamiliar`: the first transaction ever from this merchant, at least `review_new_merchant_cents` (default $25).
+- `unusual`: more than 3 times the merchant's median amount.
+- `alert`: any M6 alert attached to it (duplicate, fee, price increase).
+- `flagged`: Dan or Claude flagged it by hand.
+
+Card payments and internal transfers are never put in Review. Only transactions dated after the first sync are queued for `large` and `unfamiliar`; history is not, or the first sync would queue thousands. `fh review backfill --since <date>` queues older ones on request.
+
 **Merchant normalization.** `normalized_key` comes from Plaid's `merchant_name` when present, otherwise from the description: uppercase, strip store numbers, city and state suffixes, payment-processor prefixes (`SQ *`, `TST*`, `PAYPAL *`, `AMZN MKTP`), trailing reference numbers, and collapse whitespace. Keep the normalizer a pure function with a table-driven test file.
 
 **Clearing the queue with Claude.** Claude calls `review_queue`, proposes categories, and calls `categorize_transactions` with `create_rule: true` where the merchant is unambiguous. That sets `category_source = claude`, updates the merchant's default and creates a `merchant_key` rule, so the same merchant never reaches the queue again. For merchants that vary (Amazon, Venmo, Costco), Claude categorizes the single transaction and creates no rule.
@@ -370,7 +398,7 @@ It opens the same database file. Read tools use a read-only connection.
 | `cash_flow` | Income, spending and savings rate by month |
 | `net_worth_history` | Assets, liabilities and net worth by month |
 | `holdings` | Positions, allocation by asset class and by tax treatment |
-| `review_queue` | Transactions needing review, grouped by merchant |
+| `review_queue` | Transactions in Review, filterable by reason, grouped by merchant |
 | `list_categories`, `list_rules` | Reference data |
 | `recurring_list` | Recurring series and upcoming charges |
 | `budget_status` | Budget, spent and remaining by category for a month |
@@ -388,6 +416,7 @@ It opens the same database file. Read tools use a read-only connection.
 | `create_rule`, `update_rule`, `delete_rule` | Manage rules. `create_rule` and `update_rule` accept `dry_run` and return how many existing transactions would change, and apply to existing unlocked transactions when not a dry run |
 | `split_transaction` | Split into child amounts and categories that sum to the parent |
 | `annotate_transaction` | Set note, tags, `excluded` |
+| `review_transactions` | Mark IDs reviewed, optionally with a category, a note saying what the charge was, and a `flag` |
 | `mark_transfer` | Pair two transactions as a transfer, or unpair |
 | `set_budget` | Set a category budget for a month or as the default |
 | `update_recurring` | Mark a series ignored, ended, or a subscription |
@@ -420,7 +449,7 @@ Calm and dense, like a well-kept ledger: dark-first with a light mode, one accen
 |---|---|
 | `/` Home | Net worth with change, this month's spending against budget, cash flow for the last 6 months, upcoming recurring charges, open alerts, review-queue count |
 | `/transactions` | Searchable, filterable table. Inline category edit, split, note, tags, "make this a rule". Bulk select and categorize |
-| `/review` | The queue, grouped by merchant, one keystroke per decision |
+| `/review` | Dan's inbox for money worth a look. Tabs: Large purchases, Unfamiliar or confusing, Needs a category, Flagged. Each card shows the charge, the reason it's here, the merchant's history and similar past charges. Actions: confirm (marks reviewed), set category, say what it was (saved as the note, and offered as a rule), flag as suspicious. One keystroke per action. Flagged charges stay on the Flagged tab until marked disputed or resolved |
 | `/spending` | By category and merchant, month and year views, and a Sankey of income to categories |
 | `/budget` | Budget by category for a month, with remaining and rollover |
 | `/recurring` | Subscriptions and bills, a calendar of upcoming charges, price changes |
@@ -442,7 +471,8 @@ Ask for these at the milestone that needs them, not before.
 
 | When | What |
 |---|---|
-| M2 | Create a Plaid account at dashboard.plaid.com, choose "Personal use", start the Trial plan, and do **not** click "Get production access". Then run `fh setup` and paste the client ID and production secret into its prompt (it stores them in the Keychain). |
+| Done 2026-11-10 | Dan created a Plaid team for personal use. He must **not** click "Get production access". |
+| Before M1 | Store the Plaid client ID, Sandbox secret and Production secret in the Keychain himself (service `finance-hub`, accounts `plaid-client-id`, `plaid-secret-sandbox`, `plaid-secret-production`) with `security add-generic-password -U -s finance-hub -a <account> -w`, which prompts for the value. Keys are never pasted into chat or files. |
 | M2 | Check the Plaid Dashboard's OAuth institutions page for Fidelity's status and request access if it's offered. |
 | M2 | Link each institution himself in the dashboard. The agent never types bank credentials. |
 | M3 | Download one activity CSV and one positions CSV from Fidelity, and one activity export from NetBenefits, into the inbox. The builder reads the header rows locally and never copies data rows into the repo. |
@@ -473,13 +503,14 @@ Accepted when:
 - With Sandbox keys, linking a Sandbox institution in the browser creates a connection and accounts.
 - `fh sync` loads Sandbox transactions; a second run adds zero rows.
 - A test fires Sandbox's `ITEM_LOGIN_REQUIRED` and the connection shows `login_required`; update mode repairs it with the same connection ID.
+- Every Sandbox response is written to the raw archive before it's applied.
 - Tests cover pending-to-posted carry-over, `removed`, and the pagination-mutation restart, against recorded Sandbox responses.
 - A request with a wrong `Host` or foreign `Origin` gets a 403.
 - No secret appears in any file under the data directory or the repo (`grep` check in the acceptance run).
 
 ### M2: Real data, and the gate
 
-Build: production linking with slot protection, `fh install` for the launchd job, backups, notifications. Then Dan links accounts in this order: Capital One, Chase, Citi, Fidelity.
+Build: production linking with slot protection, the raw archive, `fh replay`, `fh backup`, `fh restore`, the iCloud backup copy, `fh install` for the launchd job, notifications. `fh setup` reads Plaid keys already in the Keychain and only prompts for missing ones. The raw archive must be working before the first production link, so the one-time history fetch is captured. Then Dan links accounts in this order: Capital One, Chase, Citi, Fidelity.
 
 Accepted when:
 
@@ -487,6 +518,9 @@ Accepted when:
 - Transaction history reaches back as far as each institution provides (up to 24 months).
 - The launchd job has run unattended on three consecutive mornings with successful `sync_runs`.
 - The slot counter matches the Plaid Dashboard's Item count.
+- `fh replay` into an empty database reproduces the same transaction count and the same sum per account as the live database.
+- Dated database copies and the raw archive appear in iCloud Drive's `Backups/finance-hub` folder after a scheduled sync.
+- `fh restore` from yesterday's backup works on a copy of the data directory.
 
 **The gate.** Decide the scope from what connected:
 
@@ -520,6 +554,7 @@ Accepted when:
 - A manual category survives a re-sync and a rule change.
 - In Claude Code, Dan asks "how much did I spend on restaurants last month", "recategorize the X charge as Y and always do that", and "clear my review queue", and each works through the tools.
 - `undo` restores the previous state of a bulk recategorization.
+- Review reasons are assigned as specified: the synthetic data's planted large purchase, first-time merchant and unusual amount each land in Review with the right reason, and a card payment of any size does not.
 - `run_sql` rejects anything that isn't a single `SELECT`.
 - Dan reports the real-data queue size after the first clear; record it in the README as the baseline.
 
@@ -532,6 +567,7 @@ Accepted when:
 - The demo is live at `https://daniel-beachy.github.io/finance-hub/` and works with the network tab showing no API calls after load.
 - Recategorizing in the demo updates the charts, and a reload resets it.
 - Every chart number clicks through to its transactions.
+- On the Review page Dan can clear a real week's items by keyboard, a note he types appears on the transaction everywhere, and a flagged charge stays on the Flagged tab until resolved.
 - Local mode shows Dan's real data and the demo shows only synthetic data; the built `dist/` contains no string from the real database (checked by a script that samples real merchant names and greps the build).
 - Checked at 375px and desktop widths in light and dark mode.
 
@@ -616,6 +652,10 @@ Accepted when:
 | Negative means money out | Reads naturally in sums: spending is negative, net is a plain total. |
 | Integer cents | No floating-point drift in money. |
 | Audit log with undo on every write | Claude makes bulk changes; they must be reversible. |
+| Archive raw Plaid responses before applying them | History is fetched once per connection and slots are limited, so the raw data must survive any bug in our own parsing. |
+| Backup copies in iCloud, live database outside it | Dan wants an off-machine copy; iCloud is safe for closed files and unsafe for a live SQLite file. |
+| Review is driven by reasons, not only missing categories | Dan wants to see large and unfamiliar charges even when a rule categorized them, to catch fraud and mistakes. |
+| Review thresholds apply only after the first sync | Otherwise two years of history would flood the inbox on day one. |
 | Gate after M2 | The feed is the biggest unknown. Finding out costs two milestones, and everything in M0 and M1 is used on either path. |
 | Dashboard and demo at M5, before budgets and projections | Dan gets a live link early, and later milestones each add a visible page. |
 | Tax numbers in dated JSON with sources | Tax law changes yearly; parameters must be auditable and replaceable without touching code. |
