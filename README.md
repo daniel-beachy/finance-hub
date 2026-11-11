@@ -67,5 +67,5 @@ Every Plaid response is saved to the `raw/` folder before it is applied to the d
 
 ## Not verified yet
 
-- Completing Plaid Link in the browser end to end, including the "Sign in again" repair. The dialog opens correctly in both cases; finishing it means accepting Plaid's terms, which the account owner does.
 - Anything against real institutions. That is M2.
+- Plaid's OAuth popup (used by Chase, Capital One and Citi). The Sandbox test used First Platypus Bank's plain login.
