@@ -675,6 +675,16 @@ Corrections found during M0 and M1. Where these differ from the text above, thes
 - **`fh sandbox-link` and `fh sandbox-break`** exist for development: the first creates a Sandbox connection without the Link UI, the second forces `ITEM_LOGIN_REQUIRED`. Both refuse to run outside Sandbox.
 - **Plaid Link takes several seconds to appear** after the button is pressed. The page says so while it waits.
 
+Added while building M5 (the dashboard), which was built before M3 and M4 while Plaid reviewed the Trial request:
+
+- **M5 came before M4.** The synthetic data already carries categories, so the dashboard did not need the rule engine. The **Rules page and "make this a rule"** wait for M4; budgets, recurring and alerts pages wait for M6 as planned.
+- **A first-cut review queue lives in `packages/core/src/review.ts`.** It assigns `uncategorized`, `large`, `unfamiliar` and `unusual` (over 3 times the merchant's median, at least 4 earlier charges). It keys merchants on `COALESCE(merchant_raw, description_raw)`; M4 swaps in the normalized merchant and calls it from sync. Today only the demo generator calls it. Duplicates stay an M6 alert: as a review reason they flooded the queue with transit fares.
+- **Edits go through `packages/core/src/mutations.ts`** (`updateTransaction`, `categorizeTransactions`), which write the `changes` log. The MCP tools in M4 should call the same functions.
+- **Dashboard numbers are defined in `packages/core/src/insights.ts`.** Spending is the net of expense-kind categories, shown positive; income is the net of income-kind categories. Transfers, investment moves, pending and excluded rows are left out.
+- **The demo's clock is pinned** to the setting `demo_as_of` (the day the data ends), so the demo never shows an empty current month. `fh demo-db` writes `packages/web/public/demo.sqlite`, which is generated at build time and not committed.
+- **Charts are hand-drawn SVG**, no chart library. The income flow is a three-column diagram (sources, income, groups plus saved).
+- **The Spending page's third figure is "Net"** (income minus spending, signed) rather than "Saved", so a month before payday does not read as a failure.
+
 ## When the plan is wrong
 
 - If a fact in section 2 has changed, or an acceptance criterion can't be met as written, stop and tell Dan what changed and what you'd do instead. Don't quietly pick a different approach.

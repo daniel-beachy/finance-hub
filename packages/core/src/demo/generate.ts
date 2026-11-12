@@ -1,5 +1,6 @@
 import type { SqlDriver } from "../db/driver.ts";
-import { DEFAULT_OWNER_ID } from "../db/seed.ts";
+import { DEFAULT_OWNER_ID, setSetting } from "../db/seed.ts";
+import { refreshReviewQueue } from "../review.ts";
 import { UNCATEGORIZED } from "../seed/categories.ts";
 import { createIdFactory } from "../util/ids.ts";
 import { addDays } from "../util/money.ts";
@@ -26,7 +27,7 @@ export interface DemoSummary {
   to: string;
 }
 
-export const DEMO_DEFAULTS = { seed: 42, asOf: "2026-11-01", months: 26 } as const;
+export const DEMO_DEFAULTS = { seed: 42, asOf: "2026-11-10", months: 26 } as const;
 
 type AccountKey =
   | "checking"
@@ -210,6 +211,11 @@ export async function generateDemoData(db: SqlDriver, options: DemoOptions = {})
       );
     }
   });
+
+  // The demo's clock is pinned to its last day of data, so "this month"
+  // always has something in it however old the build is.
+  await setSetting(db, "demo_as_of", asOf);
+  await refreshReviewQueue(db, addDays(asOf, -45));
 
   return { accounts: ACCOUNTS.length, transactions: txs.length, from: start, to: asOf };
 }

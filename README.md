@@ -4,7 +4,9 @@ A personal finance system that runs on your own Mac. It pulls transactions, bala
 
 The code is public. The data is not: nothing financial ever lives in this repo.
 
-**Status:** milestones M0 (foundation) and M1 (Plaid in Sandbox) are built. The app links Plaid's test bank, syncs it and shows a bare Accounts page. Real accounts come in M2. The full plan is in [docs/PLAN.md](docs/PLAN.md).
+**Demo:** <https://daniel-beachy.github.io/finance-hub/> runs the real dashboard in your browser on made-up data. Edits you make there last until you reload.
+
+**Status:** the foundation (M0), Plaid in Sandbox (M1) and the dashboard (M5) are built: Home, Transactions, Review, Spending, Net worth and Accounts. Real accounts (M2), file import (M3), rules and the Claude connection (M4) come next. The full plan is in [docs/PLAN.md](docs/PLAN.md).
 
 ## What you need
 
@@ -46,6 +48,8 @@ Then open http://127.0.0.1:5202.
 | `npm run fh -- env sandbox` | Choose Sandbox or Production for new links |
 | `npm run fh -- sandbox-link` | Create a test connection to Plaid's fake bank |
 | `npm run fh -- demo-db` | Write a database of made-up data for the public demo |
+| `npm run dev:demo` | Run the dashboard on made-up data at port 5201 |
+| `npm run build:demo` | Build the public demo into `packages/web/dist` |
 | `npm run check` | Lint, type-check and run the tests |
 
 ## Where things live

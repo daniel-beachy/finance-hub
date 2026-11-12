@@ -55,40 +55,121 @@ export interface TransactionView {
   id: string;
   account_id: string;
   account_name: string;
+  account_mask: string | null;
   posted_date: string;
   amount_cents: number;
   description_raw: string;
   merchant_raw: string | null;
+  /** The merchant name when known, otherwise the bank's description. */
+  label: string;
   pending: number;
   category_id: string | null;
   category_name: string | null;
+  category_kind: string | null;
+  group_name: string | null;
+  category_source: string | null;
   plaid_pfc_detailed: string | null;
+  note: string | null;
+  flag: string | null;
+  reviewed_at: string | null;
+  review_reasons: string[];
+}
+
+export type ReviewTab = "all" | "large" | "unfamiliar" | "uncategorized" | "flagged";
+
+export interface TransactionFilter {
+  limit?: number;
+  offset?: number;
+  q?: string;
+  accountId?: string;
+  categoryId?: string;
+  groupId?: string;
+  /** income | expense | transfer | investment */
+  kind?: string;
+  /** Exact merchant label. */
+  merchant?: string;
+  from?: string;
+  to?: string;
+  /** Limits to what is waiting in Review, optionally one tab of it. */
+  review?: ReviewTab;
+}
+
+/** What a transaction is called on screen: the merchant if known, else the description. */
+export const LABEL_SQL = "COALESCE(t.merchant_raw, t.description_raw)";
+
+/** Waiting in Review: has unreviewed reasons, or carries an open flag. */
+export const IN_REVIEW_SQL =
+  "((t.review_reasons IS NOT NULL AND t.reviewed_at IS NULL) OR t.flag IN ('suspicious', 'disputed'))";
+
+const REVIEW_TAB_SQL: Record<ReviewTab, string> = {
+  all: IN_REVIEW_SQL,
+  large: `(t.reviewed_at IS NULL AND (t.review_reasons LIKE '%"large"%' OR t.review_reasons LIKE '%"unusual"%'))`,
+  unfamiliar: `(t.reviewed_at IS NULL AND (t.review_reasons LIKE '%"unfamiliar"%' OR t.review_reasons LIKE '%"duplicate"%'))`,
+  uncategorized: `(t.reviewed_at IS NULL AND t.review_reasons LIKE '%"uncategorized"%')`,
+  flagged: "t.flag IN ('suspicious', 'disputed')",
+};
+
+const TRANSACTION_SELECT = `SELECT t.id, t.account_id, a.name AS account_name, a.mask AS account_mask, t.posted_date,
+       t.amount_cents, t.description_raw, t.merchant_raw, ${LABEL_SQL} AS label, t.pending, t.category_id,
+       c.name AS category_name, c.kind AS category_kind, g.name AS group_name, t.category_source,
+       t.plaid_pfc_detailed, t.note, t.flag, t.reviewed_at, t.review_reasons
+     FROM transactions t
+     JOIN accounts a ON a.id = t.account_id
+     LEFT JOIN categories c ON c.id = t.category_id
+     LEFT JOIN category_groups g ON g.id = c.group_id`;
+
+type TransactionRow = Omit<TransactionView, "review_reasons"> & { review_reasons: string | null };
+
+function toView(row: TransactionRow): TransactionView {
+  return { ...row, review_reasons: row.review_reasons ? (JSON.parse(row.review_reasons) as string[]) : [] };
+}
+
+export async function getTransaction(db: SqlDriver, id: string): Promise<TransactionView | undefined> {
+  const rows = await db.all<TransactionRow>(`${TRANSACTION_SELECT} WHERE t.id = ?`, [id]);
+  return rows[0] ? toView(rows[0]) : undefined;
 }
 
 export async function listTransactions(
   db: SqlDriver,
-  opts: { limit?: number; offset?: number; accountId?: string } = {},
-): Promise<{ total: number; rows: TransactionView[] }> {
+  opts: TransactionFilter = {},
+): Promise<{ total: number; sum_cents: number; rows: TransactionView[] }> {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
   const where = ["t.removed_at IS NULL", "t.is_split_parent = 0"];
   const params: (string | number)[] = [];
-  if (opts.accountId) {
-    where.push("t.account_id = ?");
-    params.push(opts.accountId);
+  const add = (sql: string, ...values: (string | number)[]) => {
+    where.push(sql);
+    params.push(...values);
+  };
+  if (opts.accountId) add("t.account_id = ?", opts.accountId);
+  if (opts.categoryId) add("t.category_id = ?", opts.categoryId);
+  if (opts.groupId) add("c.group_id = ?", opts.groupId);
+  if (opts.kind) add("c.kind = ?", opts.kind);
+  if (opts.merchant) add(`${LABEL_SQL} = ?`, opts.merchant);
+  if (opts.from) add("t.posted_date >= ?", opts.from);
+  if (opts.to) add("t.posted_date <= ?", opts.to);
+  if (opts.review) where.push(REVIEW_TAB_SQL[opts.review] ?? IN_REVIEW_SQL);
+  const q = opts.q?.trim();
+  if (q) {
+    const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
+    add(
+      `(t.description_raw LIKE ? ESCAPE '\\' OR t.merchant_raw LIKE ? ESCAPE '\\' OR t.note LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\')`,
+      like,
+      like,
+      like,
+      like,
+    );
   }
   const clause = where.join(" AND ");
-  const total = await db.all<{ n: number }>(`SELECT COUNT(*) AS n FROM transactions t WHERE ${clause}`, params);
-  const rows = await db.all<TransactionView>(
-    `SELECT t.id, t.account_id, a.name AS account_name, t.posted_date, t.amount_cents, t.description_raw,
-       t.merchant_raw, t.pending, t.category_id, c.name AS category_name, t.plaid_pfc_detailed
-     FROM transactions t
-     JOIN accounts a ON a.id = t.account_id
-     LEFT JOIN categories c ON c.id = t.category_id
-     WHERE ${clause}
-     ORDER BY t.posted_date DESC, t.id DESC LIMIT ? OFFSET ?`,
+  const totals = await db.all<{ n: number; sum_cents: number | null }>(
+    `SELECT COUNT(*) AS n, SUM(t.amount_cents) AS sum_cents FROM transactions t
+     LEFT JOIN categories c ON c.id = t.category_id WHERE ${clause}`,
+    params,
+  );
+  const rows = await db.all<TransactionRow>(
+    `${TRANSACTION_SELECT} WHERE ${clause} ORDER BY t.posted_date DESC, t.id DESC LIMIT ? OFFSET ?`,
     [...params, limit, opts.offset ?? 0],
   );
-  return { total: total[0]?.n ?? 0, rows };
+  return { total: totals[0]?.n ?? 0, sum_cents: totals[0]?.sum_cents ?? 0, rows: rows.map(toView) };
 }
 
 export interface SyncRunView {

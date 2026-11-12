@@ -16,6 +16,8 @@
     "check": "npm run lint && npm run typecheck && npm test",
     "dev": "npm run dev -w @finance-hub/web",
     "build": "npm run build -w @finance-hub/web",
+    "build:demo": "npm run build:demo -w @finance-hub/web",
+    "dev:demo": "npm run dev:demo -w @finance-hub/web",
     "serve": "node packages/server/bin/fh.js serve",
     "prepare": "git config core.hooksPath .githooks || true"
   },

@@ -1,26 +1,171 @@
 @import "tailwindcss";
 
-@theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --color-ink: light-dark(#16181d, #e9eaee);
-  --color-muted: light-dark(#5d6470, #9aa1ad);
-  --color-page: light-dark(#f6f6f4, #101216);
-  --color-panel: light-dark(#ffffff, #181b21);
-  --color-line: light-dark(#e2e2de, #2a2e37);
-  --color-accent: light-dark(#0f6b5c, #4fd1b5);
-  --color-warn: light-dark(#b42318, #ff8a7a);
+/*
+ * A well-kept ledger: calm, dense, dark first. One accent. Money is never
+ * painted red; red is kept for flags and alerts.
+ */
+:root {
+  color-scheme: dark;
+  --page: #0e1013;
+  --panel: #15181d;
+  --raised: #1c2027;
+  --line: #262b34;
+  --line-soft: #1e2229;
+  --ink: #e9eaee;
+  --muted: #99a0ac;
+  --faint: #6b7280;
+  --accent: #5ad1b3;
+  --accent-ink: #06231c;
+  --accent-wash: rgb(90 209 179 / 0.12);
+  --alert: #ef8576;
+  --alert-wash: rgb(239 133 118 / 0.12);
+  --series-1: #199e70;
+  --series-2: #3987e5;
 }
 
-:root {
-  color-scheme: light dark;
+:root[data-theme="light"] {
+  color-scheme: light;
+  --page: #f4f3ee;
+  --panel: #fffefb;
+  --raised: #f8f7f2;
+  --line: #dedcd3;
+  --line-soft: #ebe9e1;
+  --ink: #17191d;
+  --muted: #5a606b;
+  --faint: #878c95;
+  --accent: #0d6f5e;
+  --accent-ink: #ffffff;
+  --accent-wash: rgb(13 111 94 / 0.09);
+  --alert: #b3261e;
+  --alert-wash: rgb(179 38 30 / 0.08);
+  --series-1: #1baf7a;
+  --series-2: #2a78d6;
+}
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-serif: "New York", ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --color-page: var(--page);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-wash: var(--accent-wash);
+  --color-alert: var(--alert);
+  --color-alert-wash: var(--alert-wash);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+}
+
+html {
+  background: var(--page);
 }
 
 body {
-  background: var(--color-page);
-  color: var(--color-ink);
+  background: var(--page);
+  color: var(--ink);
   font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
 }
 
 .num {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum", "lnum";
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: var(--accent-wash);
+}
+
+@layer components {
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 7px;
+    padding: 5px 10px;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .btn:hover:not(:disabled) {
+    border-color: var(--faint);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+  .btn-primary:hover:not(:disabled) {
+    border-color: var(--accent);
+    filter: brightness(1.06);
+  }
+  .field {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 7px;
+    padding: 5px 9px;
+    font-size: 13px;
+    color: var(--ink);
+    min-width: 0;
+  }
+  .field::placeholder {
+    color: var(--faint);
+  }
+  .kbd {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
+    line-height: 1;
+    padding: 2px 4px;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    color: var(--muted);
+    background: var(--raised);
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 11.5px;
+    font-weight: 500;
+    background: var(--raised);
+    border: 1px solid var(--line);
+    color: var(--muted);
+    white-space: nowrap;
+  }
 }

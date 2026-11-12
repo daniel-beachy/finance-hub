@@ -9,7 +9,9 @@ import {
   SlotConfirmationRequired,
   slotsUsed,
 } from "../connections.ts";
-import type { CoreDeps } from "../deps.ts";
+import { type CoreDeps, localDate } from "../deps.ts";
+import { merchantHistory, netWorthHistory, overview, reviewCounts, spendingBreakdown, cashFlowByMonth, monthOf, shiftMonth } from "../insights.ts";
+import { categorizeTransactions, InvalidInput, NotFound, type TransactionPatch, updateTransaction } from "../mutations.ts";
 import { PlaidError } from "../plaid/client.ts";
 import {
   listAccounts,
@@ -18,7 +20,7 @@ import {
   listSyncRuns,
   listTransactions,
   netWorth,
-  spendingByCategory,
+  type ReviewTab,
 } from "../queries.ts";
 import { syncAll, syncConnection } from "../sync/sync.ts";
 
@@ -59,6 +61,8 @@ export function createApp(deps: CoreDeps, options: AppOptions = {}) {
     if (err instanceof SlotConfirmationRequired) {
       return c.json({ error: err.message, code: "SLOT_CONFIRMATION_REQUIRED", slots_used: err.slotsUsed }, 409);
     }
+    if (err instanceof NotFound) return c.json({ error: err.message }, 404);
+    if (err instanceof InvalidInput) return c.json({ error: err.message }, 400);
     if (err instanceof PlaidError) {
       return c.json({ error: err.message, code: err.errorCode }, 502);
     }
@@ -67,9 +71,12 @@ export function createApp(deps: CoreDeps, options: AppOptions = {}) {
 
   app.get("/api/health", (c) => c.json({ ok: true, mode }));
 
+  const today = () => localDate(deps.now());
+
   app.get("/api/status", async (c) =>
     c.json({
       mode,
+      today: today(),
       plaid_env: await getPlaidEnv(deps),
       slots_used: await slotsUsed(deps),
       slot_limit: PLAID_SLOT_LIMIT,
@@ -122,21 +129,75 @@ export function createApp(deps: CoreDeps, options: AppOptions = {}) {
 
   app.get("/api/categories", async (c) => c.json({ categories: await listCategories(deps.db) }));
 
-  app.get("/api/transactions", async (c) =>
-    c.json(
+  app.get("/api/transactions", async (c) => {
+    const q = (name: string) => c.req.query(name) || undefined;
+    return c.json(
       await listTransactions(deps.db, {
         limit: Number(c.req.query("limit")) || 50,
         offset: Number(c.req.query("offset")) || 0,
-        accountId: c.req.query("account_id"),
+        q: q("q"),
+        accountId: q("account_id"),
+        categoryId: q("category_id"),
+        groupId: q("group_id"),
+        kind: q("kind"),
+        merchant: q("merchant"),
+        from: q("from"),
+        to: q("to"),
+        review: q("review") as ReviewTab | undefined,
       }),
-    ),
-  );
+    );
+  });
+
+  app.patch("/api/transactions/:id", async (c) => {
+    const body = await readJson(c.req.raw);
+    const patch: TransactionPatch = {};
+    if (typeof body.category_id === "string") patch.category_id = body.category_id;
+    if (typeof body.note === "string" || body.note === null) patch.note = body.note;
+    if (typeof body.reviewed === "boolean") patch.reviewed = body.reviewed;
+    if (typeof body.flag === "string" || body.flag === null) patch.flag = body.flag as TransactionPatch["flag"];
+    return c.json({ transaction: await updateTransaction(deps, c.req.param("id"), patch) });
+  });
+
+  app.post("/api/transactions/categorize", async (c) => {
+    const body = await readJson(c.req.raw);
+    const ids = Array.isArray(body.ids) ? body.ids.filter((x): x is string => typeof x === "string") : [];
+    if (ids.length === 0 || typeof body.category_id !== "string") {
+      return c.json({ error: "ids and category_id are required" }, 400);
+    }
+    return c.json({ updated: await categorizeTransactions(deps, ids, body.category_id) });
+  });
+
+  app.get("/api/overview", async (c) => c.json(await overview(deps.db, today())));
 
   app.get("/api/spending", async (c) => {
     const from = c.req.query("from");
     const to = c.req.query("to");
     if (!from || !to) return c.json({ error: "from and to are required" }, 400);
-    return c.json({ categories: await spendingByCategory(deps.db, from, to) });
+    return c.json(await spendingBreakdown(deps.db, from, to));
+  });
+
+  app.get("/api/cash-flow", async (c) => {
+    const months = Math.min(Math.max(Number(c.req.query("months")) || 12, 1), 60);
+    const end = c.req.query("to")?.slice(0, 7) || monthOf(today());
+    return c.json({ months: await cashFlowByMonth(deps.db, shiftMonth(end, -(months - 1)), end) });
+  });
+
+  app.get("/api/net-worth", async (c) => {
+    const months = Math.min(Math.max(Number(c.req.query("months")) || 24, 1), 240);
+    return c.json({
+      today: today(),
+      now: await netWorth(deps.db),
+      history: await netWorthHistory(deps.db, today(), months),
+      accounts: await listAccounts(deps.db),
+    });
+  });
+
+  app.get("/api/review", async (c) => {
+    const tab = (c.req.query("tab") || "all") as ReviewTab;
+    const { rows } = await listTransactions(deps.db, { review: tab, limit: 200 });
+    const items = [];
+    for (const transaction of rows) items.push({ transaction, history: await merchantHistory(deps.db, transaction) });
+    return c.json({ counts: await reviewCounts(deps.db), items });
   });
 
   app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
