@@ -11,7 +11,7 @@ A local personal finance system: Plaid and file imports into SQLite, a dashboard
 ## Hard rules
 
 - This repo is public. Never commit real financial data, exports, databases, real merchant rules, screenshots of real data, or secrets. Fixtures are synthetic only.
-- Real data lives in `~/Library/Application Support/finance-hub/`. Secrets live in the macOS Keychain.
+- Real data lives in `~/Library/Application Support/finance-hub/`. On Dan's Mac that folder is a link to `~/brain/finances/hub/`, inside his private brain repo, where it is gitignored. Nothing from `~/brain` ever goes into this repo. Secrets live in the macOS Keychain.
 - Plaid's Trial plan has 10 connections for life. Develop and test in Sandbox. Never call `/item/remove`. Never click or request "production access". Linking a real institution is always Dan's action.
 - Never type bank or Plaid credentials. Dan enters them himself.
 - Free only: no paid services or metered API keys.
