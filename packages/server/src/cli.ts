@@ -7,12 +7,14 @@ import {
   DEMO_DEFAULTS,
   generateDemoData,
   getPlaidEnv,
+  type ImportOutcome,
   listConnections,
   listSyncRuns,
   migrate,
   PLAID_SLOT_LIMIT,
   type PlaidEnv,
   plaidClientFor,
+  processInbox,
   SECRET_CLIENT_ID,
   secretNameForEnv,
   setSetting,
@@ -31,7 +33,8 @@ const HELP = `fh: Finance Hub
   fh setup                      Check Plaid keys in the Keychain; prompt for missing ones
   fh env [sandbox|production]   Show or set which Plaid environment new links use
   fh status                     Connections, slots used and recent sync runs
-  fh sync [connection-id]       Sync all connections, or one
+  fh sync [connection-id]       Sync all connections (or one), then import the inbox
+  fh import                     Import files waiting in the inbox
   fh serve [--port N]           Start the local dashboard and API
   fh sandbox-link [ins_id]      Create a Plaid Sandbox connection (no real bank)
   fh sandbox-break <id>         Force a Sandbox connection to need sign-in again (for testing)
@@ -53,6 +56,8 @@ export async function main(argv: string[]): Promise<number> {
       return status();
     case "sync":
       return sync(flags.positional[0], flags.named.trigger);
+    case "import":
+      return importCommand();
     case "serve":
       return serveCommand(Number(flags.named.port) || DEFAULT_PORT);
     case "sandbox-link":
@@ -223,9 +228,52 @@ async function sync(connectionId: string | undefined, trigger: string | undefine
           (r.errorCode ? `  (${r.errorCode})` : ""),
       );
     }
-    return results.some((r) => r.status === "error" || r.status === "login_required") ? 1 : 0;
+    const failed = results.some((r) => r.status === "error" || r.status === "login_required");
+    // The plan runs the inbox as part of every full sync.
+    const imported = connectionId ? [] : await processInbox(ctx.deps);
+    printOutcomes(imported, false);
+    return failed || imported.some(importFailed) ? 1 : 0;
   } finally {
     ctx.close();
+  }
+}
+
+async function importCommand(): Promise<number> {
+  const ctx = await openContext();
+  try {
+    const outcomes = await processInbox(ctx.deps);
+    printOutcomes(outcomes, true);
+    return outcomes.some(importFailed) ? 1 : 0;
+  } finally {
+    ctx.close();
+  }
+}
+
+const importFailed = (o: ImportOutcome) => o.status === "error" || o.status === "unknown";
+
+function printOutcomes(outcomes: ImportOutcome[], sayWhenEmpty: boolean): void {
+  if (outcomes.length === 0 && sayWhenEmpty) console.log(`The inbox is empty.`);
+  for (const o of outcomes) {
+    switch (o.status) {
+      case "imported":
+        console.log(
+          `${o.file}: imported ${o.rows_added} of ${o.rows_total} rows` +
+            (o.rows_skipped ? ` (${o.rows_skipped} on or after Plaid's first date skipped)` : "") +
+            ` into ${o.accounts.map((a) => a.name).join(", ")}`,
+        );
+        break;
+      case "duplicate":
+        console.log(`${o.file}: already imported on ${new Date(o.imported_at).toLocaleDateString()}; moved out of the inbox`);
+        break;
+      case "needs_account":
+        console.log(
+          `${o.file}: pick the account in the dashboard (Accounts page) for ` +
+            o.accounts.map((a) => `${a.institution} ${a.name ?? ""}${a.mask ? ` ending ${a.mask}` : ""}`.trim()).join(", "),
+        );
+        break;
+      default:
+        console.log(`${o.file}: ${o.message} (left in the inbox)`);
+    }
   }
 }
 

@@ -1,0 +1,15 @@
+
+
+Run Date,Action,Symbol,Description,Type,Quantity,Price ($),Commission ($),Fees ($),Accrued Interest ($),Amount ($),Cash Balance ($),Settlement Date
+ 11/05/2026,"DEBIT CARD PURCHASE CORNER COFFEE #12 ANYTOWN XX",,No Description,Cash,,,,,,-4.75,1995.25,
+ 11/03/2026,"YOU BOUGHT EXAMPLE TOTAL MARKET INDEX (EXTMX) (Cash)",EXTMX,EXAMPLE TOTAL MARKET INDEX,Cash,10.5,100.00,,,,-1050.00,2000.00,11/04/2026
+ 10/31/2026,"DIVIDEND RECEIVED EXAMPLE TOTAL MARKET INDEX (EXTMX) (Cash)",EXTMX,EXAMPLE TOTAL MARKET INDEX,Cash,,,,,,12.34,3050.00,
+ 10/31/2026,"REINVESTMENT EXAMPLE TOTAL MARKET INDEX (EXTMX) (Cash)",EXTMX,EXAMPLE TOTAL MARKET INDEX,Cash,0.123,100.33,,,,-12.34,3037.66,
+ 10/15/2026,"ELECTRONIC FUNDS TRANSFER RECEIVED (Cash)",,No Description,Cash,,,,,,"3,000.00",3037.66,
+ 10/01/2026,"YOU SOLD EXAMPLE BOND FUND (EXBDX) (Cash)",EXBDX,EXAMPLE BOND FUND,Cash,-5,20.00,,0.02,,99.98,37.66,10/02/2026
+
+
+
+"The data and information in this spreadsheet is provided to you solely for your use and is not for distribution. Synthetic fixture."
+
+"Date downloaded 11/10/2026 4:00 PM ET"

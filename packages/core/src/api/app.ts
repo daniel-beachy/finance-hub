@@ -11,6 +11,15 @@ import {
 } from "../connections.ts";
 import { type CoreDeps, localDate } from "../deps.ts";
 import { merchantHistory, netWorthHistory, overview, reviewCounts, spendingBreakdown, cashFlowByMonth, monthOf, shiftMonth } from "../insights.ts";
+import {
+  type AccountChoice,
+  assignImportAccount,
+  discardInboxFile,
+  type InboxFile,
+  importStatus,
+  processInbox,
+  uploadFiles,
+} from "../import/importer.ts";
 import { categorizeTransactions, InvalidInput, NotFound, type TransactionPatch, updateTransaction } from "../mutations.ts";
 import { PlaidError } from "../plaid/client.ts";
 import {
@@ -198,6 +207,41 @@ export function createApp(deps: CoreDeps, options: AppOptions = {}) {
     const items = [];
     for (const transaction of rows) items.push({ transaction, history: await merchantHistory(deps.db, transaction) });
     return c.json({ counts: await reviewCounts(deps.db), items });
+  });
+
+  app.get("/api/imports", async (c) => c.json(await importStatus(deps)));
+
+  app.post("/api/imports/upload", async (c) => {
+    if (Number(c.req.header("content-length") ?? 0) > 25 * 1024 * 1024) {
+      return c.json({ error: "Files must be under 20 MB" }, 413);
+    }
+    const form = await c.req.parseBody({ all: true });
+    const field = form.files ?? form.file;
+    const list = (Array.isArray(field) ? field : [field]).filter((f): f is File => f instanceof File);
+    if (list.length === 0) return c.json({ error: "No files were attached" }, 400);
+    const files: InboxFile[] = [];
+    for (const f of list) files.push({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) });
+    return c.json({ outcomes: await uploadFiles(deps, files) });
+  });
+
+  app.post("/api/imports/process", async (c) => c.json({ outcomes: await processInbox(deps) }));
+
+  app.post("/api/imports/assign", async (c) => {
+    const body = await readJson(c.req.raw);
+    const key = typeof body.key === "string" ? body.key : "";
+    let choice: AccountChoice;
+    if (typeof body.account_id === "string") choice = { account_id: body.account_id };
+    else if (body.create && typeof body.create === "object") choice = { create: body.create as never };
+    else return c.json({ error: "account_id or create is required" }, 400);
+    const accountId = await assignImportAccount(deps, key, choice);
+    return c.json({ account_id: accountId, outcomes: deps.inbox ? await processInbox(deps) : [] });
+  });
+
+  app.post("/api/imports/discard", async (c) => {
+    const body = await readJson(c.req.raw);
+    if (typeof body.name !== "string") return c.json({ error: "name is required" }, 400);
+    await discardInboxFile(deps, body.name);
+    return c.json({ ok: true });
   });
 
   app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));

@@ -269,7 +269,7 @@ export function normalizeAccountType(type: string): "depository" | "credit" | "i
   return "other";
 }
 
-function taxTreatment(type: string, subtype: string | null): string {
+export function taxTreatment(type: string, subtype: string | null): string {
   if (type !== "investment") return "none";
   const s = (subtype ?? "").toLowerCase();
   if (s.includes("roth")) return "roth";
@@ -453,8 +453,12 @@ async function carryOverFromPending(
 async function setBackfillBoundary(deps: CoreDeps, connectionId: string): Promise<void> {
   await deps.db.run(
     `UPDATE accounts SET file_backfill_before = (
-       SELECT MIN(posted_date) FROM transactions t
-       WHERE t.account_id = accounts.id AND t.source = 'plaid' AND t.removed_at IS NULL)
+       SELECT MIN(d) FROM (
+         SELECT MIN(posted_date) AS d FROM transactions t
+         WHERE t.account_id = accounts.id AND t.source = 'plaid' AND t.removed_at IS NULL
+         UNION ALL
+         SELECT MIN(date) FROM investment_transactions i
+         WHERE i.account_id = accounts.id AND i.source = 'plaid'))
      WHERE connection_id = ? AND file_backfill_before IS NULL`,
     [connectionId],
   );

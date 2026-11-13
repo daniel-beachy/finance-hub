@@ -6,7 +6,7 @@ The code is public. The data is not: nothing financial ever lives in this repo.
 
 **Demo:** <https://daniel-beachy.github.io/finance-hub/> runs the real dashboard in your browser on made-up data. Edits you make there last until you reload.
 
-**Status:** the foundation (M0), Plaid in Sandbox (M1) and the dashboard (M5) are built: Home, Transactions, Review, Spending, Net worth and Accounts. Real accounts (M2), file import (M3), rules and the Claude connection (M4) come next. The full plan is in [docs/PLAN.md](docs/PLAN.md).
+**Status:** the foundation (M0), Plaid in Sandbox (M1), file import (M3) and the dashboard (M5) are built: Home, Transactions, Review, Spending, Net worth and Accounts. Real accounts (M2), rules and the Claude connection (M4) come next. The full plan is in [docs/PLAN.md](docs/PLAN.md).
 
 ## What you need
 
@@ -43,7 +43,8 @@ Then open http://127.0.0.1:5202.
 | `npm run fh -- init` | Create the data folder and database |
 | `npm run fh -- setup` | Check or store Plaid keys in the Keychain |
 | `npm run fh -- status` | Connections, slots used, recent syncs |
-| `npm run fh -- sync` | Pull new data for every connection |
+| `npm run fh -- sync` | Pull new data for every connection, then import the inbox |
+| `npm run fh -- import` | Import files waiting in the inbox |
 | `npm run fh -- serve` | Start the dashboard and API on port 5202 |
 | `npm run fh -- env sandbox` | Choose Sandbox or Production for new links |
 | `npm run fh -- sandbox-link` | Create a test connection to Plaid's fake bank |
@@ -57,6 +58,7 @@ Then open http://127.0.0.1:5202.
 | What | Where |
 | --- | --- |
 | Database, raw Plaid responses, logs | `~/Library/Application Support/finance-hub/` |
+| Files waiting to import / imported | `inbox/` and `imported/` in the same folder |
 | Plaid keys and access tokens | macOS Keychain, service `finance-hub` |
 | Code | `packages/core` (logic), `packages/server` (CLI and local server), `packages/web` (dashboard) |
 
@@ -69,7 +71,18 @@ Every Plaid response is saved to the `raw/` folder before it is applied to the d
 - The server only answers on `127.0.0.1` and refuses requests from other sites. It has no login, so don't expose the port.
 - Fidelity support through Plaid is not confirmed yet. File import (M3) is the fallback.
 
+## Importing files
+
+Drop files on the Accounts page, or put them in `inbox/` and run `npm run fh -- import`. It reads:
+
+- **OFX or QFX** downloads from any bank or card (Chase, Capital One, Citi and others)
+- **Fidelity** account history (`History_for_Account_*.csv`), positions (`Portfolio_Positions_*.csv`) and NetBenefits activity
+
+The first time a file's account can't be matched by its last four digits, the Accounts page asks which account it is and remembers the answer. Importing the same file twice adds nothing, and a later download that overlaps an earlier one adds only the new rows. An account fed by Plaid takes file rows only from before Plaid's first date, so nothing is counted twice. A file nothing can read stays in the inbox with an alert.
+
 ## Not verified yet
+
+- The Fidelity parsers against real downloads. They follow Fidelity's published export columns; the NetBenefits columns are a best guess until a real file is checked.
 
 - Anything against real institutions. That is M2.
 - Plaid's OAuth popup (used by Chase, Capital One and Citi). The Sandbox test used First Platypus Bank's plain login.

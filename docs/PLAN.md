@@ -685,6 +685,18 @@ Added while building M5 (the dashboard), which was built before M3 and M4 while 
 - **Charts are hand-drawn SVG**, no chart library. The income flow is a three-column diagram (sources, income, groups plus saved).
 - **The Spending page's third figure is "Net"** (income minus spending, signed) rather than "Saved", so a month before payday does not read as a failure.
 
+Added while building M3 (file import):
+
+- **Import code is in `packages/core/src/import/`.** Parsers read decoded text and return accounts with transactions, investment transactions, a balance and holdings. Core never touches the file system: the host passes an `InboxStore` in `CoreDeps` (`packages/server/src/inbox.ts` on disk; the demo has none, so the Files card is hidden there).
+- **Account matching:** the remembered choice first (setting `import_account_map`, file account key to our account id), then a single open account with the same last four digits. Anything else asks. A new account made from a file is `feed = file` under a `connections` row with `source = file` per institution.
+- **A file that names several accounts** (Fidelity positions) imports only when all of them are matched, in one transaction. `import_files.account_id` is null for such files.
+- **Fidelity history rows all go to `investment_transactions`.** Rows that move cash without buying or selling (card spending, transfers, dividends paid in cash) also go to `transactions`, so they show in spending and income. NetBenefits rows go to `investment_transactions` only.
+- **Positions write a balance per account** equal to the sum of Current Value, including the core money market and Pending Activity: that is the total Fidelity shows. Holdings for that day are replaced, not merged.
+- **The one-feed rule covers balances and holdings too:** a Plaid account takes them from a file only if dated before `file_backfill_before`. A Plaid account with no Plaid history yet refuses files until it has synced. `file_backfill_before` now also looks at Plaid investment transactions.
+- **Migration 0002** adds the `import` alert kind (raised once per unreadable file, dismissed when it imports or is discarded) and `source`, `import_file_id` on `investment_transactions`.
+- **Parsers 2 to 4 were written from Fidelity's published export format**, before Dan's files were available. Their header rows still need checking against real downloads; NetBenefits is the least certain.
+- **The fingerprint for investment rows** adds ticker and quantity to the transaction fingerprint, so a buy and a dividend of the same amount on one day stay apart.
+
 ## When the plan is wrong
 
 - If a fact in section 2 has changed, or an acceptance criterion can't be met as written, stop and tell Dan what changed and what you'd do instead. Don't quietly pick a different approach.

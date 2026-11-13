@@ -1,5 +1,6 @@
 import { type CoreDeps, createIdFactory, migrate } from "@finance-hub/core";
 import { createFileArchive } from "./archive.ts";
+import { createDiskInbox } from "./inbox.ts";
 import { createKeychainStore } from "./keychain.ts";
 import { openNodeDatabase } from "./nodeDriver.ts";
 import { dataPaths, type DataPaths, ensureDataDirs } from "./paths.ts";
@@ -22,6 +23,7 @@ export async function openContext(): Promise<AppContext> {
     archive: createFileArchive(paths.raw),
     now: () => new Date(),
     newId: createIdFactory(),
+    inbox: createDiskInbox(paths.inbox, paths.imported),
   };
   return { deps, paths, close: db.close };
 }

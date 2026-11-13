@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router";
 import { type AccountView, api, type ConnectionView, DEMO, type SyncRunView } from "../api.ts";
+import { Imports } from "../components/Imports.tsx";
 import { Card, Empty, PageHeader } from "../components/Shell.tsx";
 import { money, txLink } from "../lib/format.ts";
 import { useGet, useStatus } from "../lib/hooks.ts";
@@ -118,7 +119,7 @@ export function Accounts() {
 
       {connections && connections.length === 0 && loose.length === 0 && (
         <Card>
-          <Empty>Nothing is linked yet. Link a bank to pull in its accounts and transactions.</Empty>
+          <Empty>Nothing is linked yet. Link a bank to pull in its accounts and transactions, or import a file below.</Empty>
         </Card>
       )}
 
@@ -132,8 +133,8 @@ export function Accounts() {
                   {c.plaid_env === "sandbox" && <span className="chip ml-2">sandbox</span>}
                 </h2>
                 <p className="text-xs text-muted">
-                  {c.status === "ok" ? "Connected" : c.status.replace("_", " ")}
-                  {c.last_synced_at && ` · synced ${new Date(c.last_synced_at).toLocaleString()}`}
+                  {c.source === "file" ? "From files" : c.status === "ok" ? "Connected" : c.status.replace("_", " ")}
+                  {c.last_synced_at && ` · ${c.source === "file" ? "last import" : "synced"} ${new Date(c.last_synced_at).toLocaleString()}`}
                 </p>
               </div>
               {(c.status === "login_required" || c.status === "pending_disconnect") && !DEMO && (
@@ -152,6 +153,8 @@ export function Accounts() {
           </Card>
         )}
       </div>
+
+      {!DEMO && <Imports accounts={accounts} />}
 
       {runs.length > 0 && (
         <Card title="Recent syncs" className="mt-4">

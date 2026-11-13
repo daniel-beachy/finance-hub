@@ -3,6 +3,8 @@ import type {
   CashFlowMonth,
   CategoryView,
   ConnectionView,
+  ImportFileView,
+  ImportOutcome,
   MerchantHistory,
   NetWorthPoint,
   Overview,
@@ -10,6 +12,7 @@ import type {
   SpendingBreakdown,
   SyncRunView,
   TransactionView,
+  UnmatchedAccount,
 } from "@finance-hub/core";
 
 export type {
@@ -17,6 +20,8 @@ export type {
   CashFlowMonth,
   CategoryView,
   ConnectionView,
+  ImportFileView,
+  ImportOutcome,
   MerchantHistory,
   NetWorthPoint,
   Overview,
@@ -24,7 +29,18 @@ export type {
   SpendingBreakdown,
   SyncRunView,
   TransactionView,
+  UnmatchedAccount,
 };
+
+export type InboxEntry = ImportOutcome | { file: string; status: "ready"; parser: string; accounts: { id: string; name: string; rows: number }[] };
+
+export interface ImportStatus {
+  available: boolean;
+  inbox: InboxEntry[];
+  recent: ImportFileView[];
+  alerts: { id: string; message: string; created_at: string }[];
+  parsers: string[];
+}
 
 export const DEMO = import.meta.env.VITE_MODE === "demo";
 
@@ -77,6 +93,16 @@ export async function api<T>(path: string, body?: unknown, method?: "POST" | "PA
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(json.error ?? `Request failed (${res.status})`, json.code);
+  return json as T;
+}
+
+/** Send files as multipart form data. Local mode only. */
+export async function uploadFiles<T>(path: string, files: File[]): Promise<T> {
+  const form = new FormData();
+  for (const f of files) form.append("files", f);
+  const res = await send(path, { method: "POST", body: form });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(json.error ?? `Request failed (${res.status})`, json.code);
   return json as T;

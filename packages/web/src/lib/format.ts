@@ -32,6 +32,13 @@ function parse(date: string): Date {
   return new Date(y!, (m ?? 1) - 1, d ?? 1);
 }
 
+/** `YYYY-MM-DD` in local time for an ISO timestamp. */
+export function localDay(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 /** Nov 3, or Nov 3, 2025 when the year differs from `today`. */
 export function shortDate(date: string, today?: string): string {
   const sameYear = today ? date.slice(0, 4) === today.slice(0, 4) : false;
