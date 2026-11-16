@@ -73,6 +73,18 @@ export interface TransactionView {
   flag: string | null;
   reviewed_at: string | null;
   review_reasons: string[];
+  rule_id: string | null;
+  excluded: number;
+  /** The normalized merchant, the key rules match on. */
+  merchant_key: string | null;
+  transfer_group_id: string | null;
+  transfer_kind: string | null;
+  /** The other side of a transfer pair, when there is one. */
+  transfer_peer_id: string | null;
+  transfer_peer_account: string | null;
+  transfer_peer_date: string | null;
+  transfer_peer_amount_cents: number | null;
+  tags: string[];
 }
 
 export type ReviewTab = "all" | "large" | "unfamiliar" | "uncategorized" | "flagged";
@@ -112,16 +124,26 @@ const REVIEW_TAB_SQL: Record<ReviewTab, string> = {
 const TRANSACTION_SELECT = `SELECT t.id, t.account_id, a.name AS account_name, a.mask AS account_mask, t.posted_date,
        t.amount_cents, t.description_raw, t.merchant_raw, ${LABEL_SQL} AS label, t.pending, t.category_id,
        c.name AS category_name, c.kind AS category_kind, g.name AS group_name, t.category_source,
-       t.plaid_pfc_detailed, t.note, t.flag, t.reviewed_at, t.review_reasons
+       t.plaid_pfc_detailed, t.note, t.flag, t.reviewed_at, t.review_reasons, t.rule_id, t.excluded,
+       m.normalized_key AS merchant_key, t.transfer_group_id, tg.kind AS transfer_kind,
+       p.id AS transfer_peer_id, pa.name AS transfer_peer_account, p.posted_date AS transfer_peer_date,
+       p.amount_cents AS transfer_peer_amount_cents,
+       (SELECT json_group_array(tags.name) FROM transaction_tags tt JOIN tags ON tags.id = tt.tag_id
+         WHERE tt.transaction_id = t.id) AS tags
      FROM transactions t
      JOIN accounts a ON a.id = t.account_id
      LEFT JOIN categories c ON c.id = t.category_id
-     LEFT JOIN category_groups g ON g.id = c.group_id`;
+     LEFT JOIN category_groups g ON g.id = c.group_id
+     LEFT JOIN merchants m ON m.id = t.merchant_id
+     LEFT JOIN transfer_groups tg ON tg.id = t.transfer_group_id
+     LEFT JOIN transactions p ON p.transfer_group_id = t.transfer_group_id AND p.id != t.id
+     LEFT JOIN accounts pa ON pa.id = p.account_id`;
 
-type TransactionRow = Omit<TransactionView, "review_reasons"> & { review_reasons: string | null };
+type TransactionRow = Omit<TransactionView, "review_reasons" | "tags"> & { review_reasons: string | null; tags: string | null };
 
 function toView(row: TransactionRow): TransactionView {
-  return { ...row, review_reasons: row.review_reasons ? (JSON.parse(row.review_reasons) as string[]) : [] };
+  const tags = row.tags ? (JSON.parse(row.tags) as (string | null)[]).filter((x): x is string => x !== null).sort() : [];
+  return { ...row, review_reasons: row.review_reasons ? (JSON.parse(row.review_reasons) as string[]) : [], tags };
 }
 
 export async function getTransaction(db: SqlDriver, id: string): Promise<TransactionView | undefined> {

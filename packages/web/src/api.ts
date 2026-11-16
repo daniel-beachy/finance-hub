@@ -9,9 +9,13 @@ import type {
   NetWorthPoint,
   Overview,
   ReviewCounts,
+  Rule,
+  RuleEditResult,
+  RuleMatch,
   SpendingBreakdown,
   SyncRunView,
   TransactionView,
+  UndoResult,
   UnmatchedAccount,
 } from "@finance-hub/core";
 
@@ -26,11 +30,17 @@ export type {
   NetWorthPoint,
   Overview,
   ReviewCounts,
+  Rule,
+  RuleEditResult,
+  RuleMatch,
   SpendingBreakdown,
   SyncRunView,
   TransactionView,
+  UndoResult,
   UnmatchedAccount,
 };
+
+export type RuleView = Rule & { category_name: string | null };
 
 export type InboxEntry = ImportOutcome | { file: string; status: "ready"; parser: string; accounts: { id: string; name: string; rows: number }[] };
 
@@ -87,9 +97,9 @@ const send: Send = DEMO
   ? async (path, init) => (await import("./demo.ts")).demoFetch(path, init)
   : (path, init) => fetch(path, init);
 
-export async function api<T>(path: string, body?: unknown, method?: "POST" | "PATCH"): Promise<T> {
+export async function api<T>(path: string, body?: unknown, method?: "POST" | "PATCH" | "DELETE"): Promise<T> {
   const res = await send(path, {
-    method: body === undefined ? "GET" : (method ?? "POST"),
+    method: method ?? (body === undefined ? "GET" : "POST"),
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });

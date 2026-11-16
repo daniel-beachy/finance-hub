@@ -89,3 +89,9 @@ export const SearchIcon = () => (
     <path d="m13 13 3.5 3.5" />
   </Icon>
 );
+export const RuleIcon = () => (
+  <Icon>
+    <path d="M4 5.5h7M4 10h4M4 14.5h5.5" />
+    <path d="m12.5 11.5 2 2 3.5-4" />
+  </Icon>
+);

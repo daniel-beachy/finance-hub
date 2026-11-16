@@ -117,3 +117,106 @@ describe("after-sync hook", () => {
     expect(calls).toBe(1);
   });
 });
+
+describe("rule, transfer and undo routes", () => {
+  async function seeded() {
+    const s = await setup();
+    await generateDemoData(s.deps.db, { months: 3, asOf: "2026-06-30" });
+    const json = async (path: string, method = "GET", body?: unknown) => {
+      const res = await s.call(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+      return { status: res.status, body: (await res.json()) as any };
+    };
+    return { ...s, json };
+  }
+
+  it("lists rules with their category names", async () => {
+    const { json } = await seeded();
+    const { body } = await json("/api/rules");
+    expect(body.rules.length).toBeGreaterThanOrEqual(3);
+    const store = body.rules.find((r: any) => r.match.merchant_key === "RIVERMART");
+    expect(store.category_name).toBeTruthy();
+  });
+
+  it("dry-runs a rule without writing, then creates it, then undoes it", async () => {
+    const { json } = await seeded();
+    const before = (await json("/api/rules")).body.rules.length;
+    const match = { merchant_key: "BLUE DOOR PIZZA" };
+    const dry = await json("/api/rules", "POST", { match, category_id: "food.groceries", dry_run: true });
+    expect(dry.status).toBe(200);
+    expect(dry.body.dry_run).toBe(true);
+    expect(dry.body.changed).toBeGreaterThan(0);
+    expect(dry.body.batch_id).toBeUndefined();
+    expect((await json("/api/rules")).body.rules).toHaveLength(before);
+
+    const made = await json("/api/rules", "POST", { match, category_id: "food.groceries" });
+    expect(made.body.changed).toBe(dry.body.changed);
+    expect(made.body.batch_id).toBeTruthy();
+    const pizza = await json(`/api/transactions?merchant=${encodeURIComponent("Blue Door Pizza")}&limit=5`);
+    expect(pizza.body.rows.every((r: any) => r.category_id === "food.groceries")).toBe(true);
+
+    const undone = await json("/api/undo", "POST", { batch_id: made.body.batch_id });
+    expect(undone.body.undone).toHaveLength(1);
+    expect((await json("/api/rules")).body.rules).toHaveLength(before);
+    const back = await json(`/api/transactions?merchant=${encodeURIComponent("Blue Door Pizza")}&limit=5`);
+    expect(back.body.rows.every((r: any) => r.category_id === "food.restaurants")).toBe(true);
+  });
+
+  it("updates and deletes a rule, and rejects a bad one", async () => {
+    const { json } = await seeded();
+    const made = await json("/api/rules", "POST", { match: { merchant_key: "STREAMLY" }, category_id: "entertainment.streaming" });
+    const id = made.body.rule.id;
+    const off = await json(`/api/rules/${id}`, "PATCH", { enabled: false });
+    expect(off.body.rule.enabled).toBe(false);
+    const gone = await json(`/api/rules/${id}`, "DELETE");
+    expect(gone.body.rule).toBeNull();
+    expect((await json(`/api/rules/${id}`, "PATCH", { enabled: true })).status).toBe(404);
+    expect((await json("/api/rules", "POST", { match: {}, category_id: "food.groceries" })).status).toBe(400);
+    expect((await json("/api/rules", "POST", { match: { colour: "red" }, category_id: "food.groceries" })).status).toBe(400);
+  });
+
+  it("categorizes with create_rule and remember, and undoes the whole batch", async () => {
+    const { json } = await seeded();
+    const rows = (await json(`/api/transactions?q=${encodeURIComponent("COASTLINE KAYAK")}&limit=50`)).body.rows;
+    expect(rows.length).toBeGreaterThan(0);
+    const res = await json("/api/transactions/categorize", "POST", {
+      ids: [rows[0].id],
+      category_id: "entertainment.events",
+      create_rule: true,
+      remember: false,
+    });
+    expect(res.body.rules).toHaveLength(1);
+    expect(res.body.rules[0].match).toEqual({ merchant_key: rows[0].merchant_key });
+    const undone = await json("/api/undo", "POST", { batch_id: res.body.batch_id });
+    expect(undone.body.skipped).toEqual([]);
+    expect((await json("/api/rules")).body.rules.some((r: any) => r.id === res.body.rules[0].id)).toBe(false);
+  });
+
+  it("returns a batch id from a transaction edit that undo reverses", async () => {
+    const { json } = await seeded();
+    const row = (await json("/api/transactions?limit=1")).body.rows[0];
+    const edit = await json(`/api/transactions/${row.id}`, "PATCH", { note: "hello" });
+    expect(edit.body.transaction.note).toBe("hello");
+    await json("/api/undo", "POST", { batch_id: edit.body.batch_id });
+    expect((await json(`/api/transactions?q=hello`)).body.total).toBe(0);
+    expect((await json("/api/undo", "POST", {})).status).toBe(400);
+    expect((await json("/api/undo", "POST", { batch_id: "nope" })).status).toBe(404);
+  });
+
+  it("shows a transfer's other side, and unmarks and re-marks a pair", async () => {
+    const { json } = await seeded();
+    const out = (await json(`/api/transactions?q=${encodeURIComponent("TRANSFER TO SAVINGS")}&limit=1`)).body.rows[0];
+    expect(out.transfer_peer_id).toBeTruthy();
+    expect(out.transfer_peer_amount_cents).toBe(-out.amount_cents);
+    expect(out.transfer_kind).toBe("internal_transfer");
+    const peer = out.transfer_peer_id;
+
+    const unmarked = await json("/api/transfers/unmark", "POST", { id: out.id });
+    expect(unmarked.body.change_ids).toHaveLength(2);
+    const after = (await json(`/api/transactions?q=${encodeURIComponent("TRANSFER TO SAVINGS")}&limit=1`)).body.rows[0];
+    expect(after.transfer_peer_id).toBeNull();
+
+    const marked = await json("/api/transfers/mark", "POST", { ids: [out.id, peer] });
+    expect(marked.body.kind).toBe("internal_transfer");
+    expect((await json("/api/transfers/mark", "POST", { ids: [out.id] })).status).toBe(400);
+  });
+});

@@ -8,6 +8,7 @@ import { Accounts } from "./pages/Accounts.tsx";
 import { Home } from "./pages/Home.tsx";
 import { NetWorth } from "./pages/NetWorth.tsx";
 import { Review } from "./pages/Review.tsx";
+import { Rules } from "./pages/Rules.tsx";
 import { Spending } from "./pages/Spending.tsx";
 import { Transactions } from "./pages/Transactions.tsx";
 import "./index.css";
@@ -29,6 +30,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/spending" element={<Spending />} />
             <Route path="/net-worth" element={<NetWorth />} />
             <Route path="/accounts" element={<Accounts />} />
+            <Route path="/rules" element={<Rules />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Shell>

@@ -217,11 +217,13 @@ export async function updateTransaction(
   patch: TransactionPatch,
   actor: Actor = "user",
   options: Pick<EditOptions, "remember"> = {},
-): Promise<TransactionView> {
+): Promise<TransactionView & { batch_id: string | null; change_ids: string[] }> {
   return inBatch(deps, actor, "update_transaction", async (batch) => {
     await patchTransaction(deps, batch, id, patch, options.remember ?? true);
     if (batch.changeIds.length) await settle(deps);
-    return (await getTransaction(deps.db, id))!;
+    const view = (await getTransaction(deps.db, id))!;
+    // No batch when nothing changed, so there is nothing to undo.
+    return { ...view, batch_id: batch.changeIds.length ? batch.id : null, change_ids: batch.changeIds };
   });
 }
 

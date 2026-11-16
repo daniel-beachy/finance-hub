@@ -1,13 +1,27 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import type { AccountView, TransactionPage, TransactionView } from "../api.ts";
 import { FlagIcon, SearchIcon } from "../components/icons.tsx";
+import { RuleEditor } from "../components/rules.tsx";
 import { Card, Empty, ErrorNote, PageHeader } from "../components/Shell.tsx";
 import { accountLabel, Amount, CategorySelect, Marks, NoteField } from "../components/tx.tsx";
 import { money, shortDate } from "../lib/format.ts";
-import { useCategories, useCategorizeMany, useDebounced, useGet, useStatus, useUpdateTransaction } from "../lib/hooks.ts";
+import { useCategories, useCategorizeMany, useDebounced, useGet, useStatus, useTransferEdit, useUpdateTransaction } from "../lib/hooks.ts";
 
 const PAGE = 50;
+const TRANSFER_LABEL: Record<string, string> = {
+  internal_transfer: "Transfer between your accounts",
+  card_payment: "Card payment",
+  investment_contribution: "Investment contribution",
+};
+const SOURCE_LABEL: Record<string, string> = {
+  manual: "you",
+  claude: "Claude",
+  rule: "a rule",
+  memory: "merchant memory",
+  plaid: "Plaid",
+  transfer: "transfer matching",
+};
 const FILTERS = ["q", "account_id", "category_id", "group_id", "kind", "merchant", "from", "to", "review"] as const;
 const REVIEW_LABELS: Record<string, string> = {
   all: "Waiting for review",
@@ -91,7 +105,11 @@ export function Transactions() {
             </>
           )
         }
-      />
+      >
+        <Link to="/rules" className="btn">
+          Rules
+        </Link>
+      </PageHeader>
 
       <div className="mb-3 grid grid-cols-2 gap-2 md:flex md:flex-wrap">
         <label className="field col-span-2 flex items-center gap-2 md:w-64">
@@ -247,6 +265,11 @@ function Row({
   onPatch: (patch: Parameters<ReturnType<typeof useUpdateTransaction>["mutate"]>[0]["patch"]) => void;
 }) {
   const flagged = tx.flag === "suspicious" || tx.flag === "disputed";
+  const [ruling, setRuling] = useState(false);
+  const transfer = useTransferEdit();
+  useEffect(() => {
+    if (!open) setRuling(false);
+  }, [open]);
   return (
     <li
       className={`grid grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-t border-line-soft px-4 py-2 md:grid-cols-[18px_64px_minmax(0,1fr)_150px_184px_104px] ${checked ? "bg-accent-wash" : ""}`}
@@ -271,9 +294,39 @@ function Row({
           <button type="button" className="btn justify-center" onClick={() => onPatch(flagged ? { flag: "resolved" } : { flag: "suspicious" })}>
             <FlagIcon /> {flagged ? "Mark resolved" : "Flag as suspicious"}
           </button>
+          {tx.transfer_peer_id && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-line-soft bg-panel px-3 py-2 text-[13px] md:col-span-2">
+              <span className="min-w-0 flex-1">
+                {TRANSFER_LABEL[tx.transfer_kind ?? ""] ?? "Transfer"}: the other side is{" "}
+                <span className="num">{money(Math.abs(tx.transfer_peer_amount_cents ?? 0))}</span>{" "}
+                {(tx.transfer_peer_amount_cents ?? 0) > 0 ? "into" : "out of"} {tx.transfer_peer_account} on{" "}
+                {tx.transfer_peer_date && shortDate(tx.transfer_peer_date, today)}.
+              </span>
+              <button type="button" className="btn !py-1 text-xs" disabled={transfer.isPending} onClick={() => transfer.mutate({ unmark: tx.id })}>
+                Not a transfer
+              </button>
+            </div>
+          )}
+          {ruling ? (
+            <div className="rounded-md border border-line-soft bg-panel p-3 md:col-span-2">
+              <p className="eyebrow mb-2">Make this a rule</p>
+              <RuleEditor
+                initialMatch={tx.merchant_key ? { merchant_key: tx.merchant_key } : { description_contains: tx.description_raw }}
+                initialCategory={tx.category_id === "uncategorized.uncategorized" ? null : tx.category_id}
+                fromTransaction={tx.id}
+                categories={categories}
+                onDone={() => setRuling(false)}
+              />
+            </div>
+          ) : (
+            <button type="button" className="btn justify-center md:col-start-2" onClick={() => setRuling(true)}>
+              Make this a rule
+            </button>
+          )}
           <p className="text-xs text-muted md:col-span-2">
             {tx.description_raw} · {accountLabel(tx)}
-            {tx.category_source && ` · categorized by ${tx.category_source === "manual" ? "you" : tx.category_source}`}
+            {tx.category_source && ` · categorized by ${SOURCE_LABEL[tx.category_source] ?? tx.category_source}`}
+            {tx.merchant_key && ` · merchant ${tx.merchant_key}`}
           </p>
         </div>
       )}

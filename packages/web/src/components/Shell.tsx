@@ -2,7 +2,8 @@ import { type ReactNode, useEffect, useState } from "react";
 import { NavLink } from "react-router";
 import { DEMO, type ReviewCounts } from "../api.ts";
 import { useGet } from "../lib/hooks.ts";
-import { BankIcon, HomeIcon, InboxIcon, ListIcon, MoonIcon, PieIcon, SunIcon, TrendIcon } from "./icons.tsx";
+import { BankIcon, HomeIcon, InboxIcon, ListIcon, MoonIcon, PieIcon, RuleIcon, SunIcon, TrendIcon } from "./icons.tsx";
+import { UndoToast } from "./rules.tsx";
 
 const NAV = [
   { to: "/", label: "Home", short: "Home", icon: HomeIcon },
@@ -11,6 +12,8 @@ const NAV = [
   { to: "/spending", label: "Spending", short: "Spending", icon: PieIcon },
   { to: "/net-worth", label: "Net worth", short: "Worth", icon: TrendIcon },
   { to: "/accounts", label: "Accounts", short: "Accounts", icon: BankIcon },
+  // On a phone, Rules is reached from the Transactions page; the tab bar has no room.
+  { to: "/rules", label: "Rules", short: "Rules", icon: RuleIcon, rail: true },
 ] as const;
 
 function useTheme(): [string, () => void] {
@@ -95,11 +98,13 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <main className="mx-auto max-w-[1080px] px-4 pt-5 pb-24 md:px-8 md:pt-8 md:pb-12">{children}</main>
 
+      <UndoToast />
+
       <nav
         className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-panel pb-[env(safe-area-inset-bottom)] md:hidden"
         aria-label="Main"
       >
-        {NAV.map(({ to, short, icon: Icon }) => (
+        {NAV.filter((n) => !("rail" in n)).map(({ to, short, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}

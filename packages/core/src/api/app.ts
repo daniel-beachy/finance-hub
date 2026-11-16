@@ -21,7 +21,19 @@ import {
   uploadFiles,
 } from "../import/importer.ts";
 import { InvalidInput, NotFound } from "../errors.ts";
-import { categorizeTransactions, type TransactionPatch, updateTransaction } from "../mutations.ts";
+import { listRules } from "../categorize/rules.ts";
+import type { TransferKind } from "../categorize/settle.ts";
+import {
+  categorizeTransactions,
+  createRule,
+  deleteRule,
+  markTransfer,
+  type TransactionPatch,
+  undo,
+  unmarkTransfer,
+  updateRule,
+  updateTransaction,
+} from "../mutations.ts";
 import { PlaidError } from "../plaid/client.ts";
 import {
   listAccounts,
@@ -180,7 +192,10 @@ export function createApp(deps: CoreDeps, options: AppOptions = {}) {
     if (typeof body.note === "string" || body.note === null) patch.note = body.note;
     if (typeof body.reviewed === "boolean") patch.reviewed = body.reviewed;
     if (typeof body.flag === "string" || body.flag === null) patch.flag = body.flag as TransactionPatch["flag"];
-    return c.json({ transaction: await updateTransaction(deps, c.req.param("id"), patch) });
+    if (typeof body.excluded === "boolean") patch.excluded = body.excluded;
+    const remember = typeof body.remember === "boolean" ? body.remember : undefined;
+    const result = await updateTransaction(deps, c.req.param("id"), patch, "user", { remember });
+    return c.json({ transaction: result, batch_id: result.batch_id });
   });
 
   app.post("/api/transactions/categorize", async (c) => {
@@ -189,8 +204,77 @@ export function createApp(deps: CoreDeps, options: AppOptions = {}) {
     if (ids.length === 0 || typeof body.category_id !== "string") {
       return c.json({ error: "ids and category_id are required" }, 400);
     }
-    const result = await categorizeTransactions(deps, ids, body.category_id);
-    return c.json({ updated: result.updated, batch_id: result.batch_id });
+    const result = await categorizeTransactions(deps, ids, body.category_id, "user", {
+      createRule: body.create_rule === true,
+      remember: typeof body.remember === "boolean" ? body.remember : undefined,
+    });
+    return c.json(result);
+  });
+
+  app.get("/api/rules", async (c) => {
+    const categories = new Map((await listCategories(deps.db)).map((x) => [x.id, x.name]));
+    const rules = (await listRules(deps.db)).map((r) => ({ ...r, category_name: categories.get(r.actions.category_id) ?? null }));
+    return c.json({ rules });
+  });
+
+  app.post("/api/rules", async (c) => {
+    const body = await readJson(c.req.raw);
+    if (typeof body.category_id !== "string") return c.json({ error: "category_id is required" }, 400);
+    const result = await createRule(
+      deps,
+      {
+        match: body.match,
+        category_id: body.category_id,
+        priority: body.priority as number | undefined,
+        enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+        created_from_transaction_id:
+          typeof body.created_from_transaction_id === "string" ? body.created_from_transaction_id : null,
+      },
+      { dryRun: body.dry_run === true },
+    );
+    return c.json(result);
+  });
+
+  app.patch("/api/rules/:id", async (c) => {
+    const body = await readJson(c.req.raw);
+    const result = await updateRule(
+      deps,
+      c.req.param("id"),
+      {
+        match: body.match,
+        category_id: typeof body.category_id === "string" ? body.category_id : undefined,
+        priority: body.priority as number | undefined,
+        enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+      },
+      { dryRun: body.dry_run === true },
+    );
+    return c.json(result);
+  });
+
+  app.delete("/api/rules/:id", async (c) => {
+    const dryRun = c.req.query("dry_run") === "true";
+    return c.json(await deleteRule(deps, c.req.param("id"), { dryRun }));
+  });
+
+  app.post("/api/transfers/mark", async (c) => {
+    const body = await readJson(c.req.raw);
+    const ids = Array.isArray(body.ids) ? body.ids.filter((x): x is string => typeof x === "string") : [];
+    if (ids.length !== 2) return c.json({ error: "ids must be two transaction ids" }, 400);
+    const kind = typeof body.kind === "string" ? (body.kind as TransferKind) : undefined;
+    return c.json(await markTransfer(deps, [ids[0]!, ids[1]!], { kind }));
+  });
+
+  app.post("/api/transfers/unmark", async (c) => {
+    const body = await readJson(c.req.raw);
+    if (typeof body.id !== "string") return c.json({ error: "id is required" }, 400);
+    return c.json(await unmarkTransfer(deps, body.id));
+  });
+
+  app.post("/api/undo", async (c) => {
+    const body = await readJson(c.req.raw);
+    const id = typeof body.batch_id === "string" ? body.batch_id : typeof body.change_id === "string" ? body.change_id : null;
+    if (!id) return c.json({ error: "batch_id or change_id is required" }, 400);
+    return c.json(await undo(deps, id));
   });
 
   app.get("/api/overview", async (c) => c.json(await overview(deps.db, today())));
