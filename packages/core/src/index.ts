@@ -19,6 +19,7 @@ export * from "./queries.ts";
 export * from "./review.ts";
 export * from "./secrets.ts";
 export * from "./seed/categories.ts";
+export * from "./sync/replay.ts";
 export * from "./sync/sync.ts";
 export * from "./util/ids.ts";
 export * from "./util/money.ts";

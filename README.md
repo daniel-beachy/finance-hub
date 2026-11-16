@@ -6,7 +6,7 @@ The code is public. The data is not: nothing financial ever lives in this repo.
 
 **Demo:** <https://daniel-beachy.github.io/finance-hub/> runs the real dashboard in your browser on made-up data. Edits you make there last until you reload.
 
-**Status:** the foundation (M0), Plaid in Sandbox (M1), file import (M3) and the dashboard (M5) are built: Home, Transactions, Review, Spending, Net worth and Accounts. Real accounts (M2), rules and the Claude connection (M4) come next. The full plan is in [docs/PLAN.md](docs/PLAN.md).
+**Status:** the foundation (M0), Plaid in Sandbox (M1), file import (M3) and the dashboard (M5) are built: Home, Transactions, Review, Spending, Net worth and Accounts. M2's tooling is built: backups, restore, replay of the raw archive, and the daily sync. Linking real accounts is next, then rules and the Claude connection (M4). The full plan is in [docs/PLAN.md](docs/PLAN.md).
 
 ## What you need
 
@@ -43,8 +43,12 @@ Then open http://127.0.0.1:5202.
 | `npm run fh -- init` | Create the data folder and database |
 | `npm run fh -- setup` | Check or store Plaid keys in the Keychain |
 | `npm run fh -- status` | Connections, slots used, recent syncs |
-| `npm run fh -- sync` | Pull new data for every connection, then import the inbox |
+| `npm run fh -- sync` | Pull new data for every connection, import the inbox, then back up |
 | `npm run fh -- import` | Import files waiting in the inbox |
+| `npm run fh -- backup` | Back up the database now, locally and to iCloud Drive |
+| `npm run fh -- restore <file>` | Replace the database with a backup (asks first; keeps the old one) |
+| `npm run fh -- replay` | Rebuild everything Plaid sent from the raw archive into a new file, and compare it with the live database |
+| `npm run fh -- install` | Run `fh sync` every day at 06:30 (a launchd job); `uninstall` turns it off |
 | `npm run fh -- serve` | Start the dashboard and API on port 5202 |
 | `npm run fh -- env sandbox` | Choose Sandbox or Production for new links |
 | `npm run fh -- sandbox-link` | Create a test connection to Plaid's fake bank |
@@ -62,7 +66,21 @@ Then open http://127.0.0.1:5202.
 | Plaid keys and access tokens | macOS Keychain, service `finance-hub` |
 | Code | `packages/core` (logic), `packages/server` (CLI and local server), `packages/web` (dashboard) |
 
-Every Plaid response is saved to the `raw/` folder before it is applied to the database, so history can be rebuilt even if the database is lost.
+Every Plaid response, and every Plaid error, is saved to the `raw/` folder before anything is applied to the database, so history can be rebuilt even if the database is lost.
+
+## Backups
+
+- **After every full sync**, and after linking or syncing from the dashboard, the database is copied with `VACUUM INTO` to `backups/finance-YYYY-MM-DD.db`. The newest 14 copies are kept.
+- That copy, plus any new raw Plaid responses and imported files, then goes to iCloud Drive › `Backups/finance-hub/`. iCloud keeps every daily copy for 30 days, then the first copy of each month forever. Only finished files go to iCloud, never the live database. If the copy fails, the sync still succeeds and an alert is recorded.
+- **`fh restore <file>`** puts a backup back. The database it replaces is kept as `finance.db.before-restore`.
+- **`fh replay`** rebuilds every Plaid connection from the raw archive alone, through the same code a live sync uses, and checks the transaction count and total per account against the live database. Categories, notes, rules and file imports aren't in the raw archive; the database backups cover those.
+- **Plaid access tokens are not in any backup.** They live only in the Keychain. On a new Mac, move the `finance-hub` Keychain items by hand (Keychain Access, or `security find-generic-password -s finance-hub -a <name> -w`), or the connections will need relinking, which costs slots.
+
+## The daily sync
+
+`npm run fh -- install` adds a launchd job that runs `fh sync` at 06:30, or when the Mac wakes if it was asleep then. It logs to `logs/sync.log` in the data folder. It posts a macOS notification when a bank needs you to sign in again, a sync fails, a file in the inbox needs you, the iCloud copy fails, or a connection's Plaid access is about to expire.
+
+The job runs through `/bin/bash`, so for the iCloud copy `/bin/bash` needs Full Disk Access (System Settings › Privacy & Security › Full Disk Access).
 
 ## Limits to know about
 
@@ -84,5 +102,5 @@ The first time a file's account can't be matched by its last four digits, the Ac
 
 - The Fidelity parsers against real downloads. They follow Fidelity's published export columns; the NetBenefits columns are a best guess until a real file is checked.
 
-- Anything against real institutions. That is M2.
+- Anything against real institutions. Linking them is the rest of M2.
 - Plaid's OAuth popup (used by Chase, Capital One and Citi). The Sandbox test used First Platypus Bank's plain login.

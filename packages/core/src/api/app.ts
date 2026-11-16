@@ -41,6 +41,12 @@ export interface AppOptions {
    */
   allowedOrigins?: string[];
   mode?: "local" | "demo";
+  /**
+   * Runs in the background after a link, a reconnect or a sync from the
+   * dashboard. The local server backs up here, so a new connection's one-time
+   * history reaches iCloud right away instead of at the next daily sync.
+   */
+  afterSync?: () => Promise<unknown>;
 }
 
 /**
@@ -51,6 +57,9 @@ export interface AppOptions {
 export function createApp(deps: CoreDeps, options: AppOptions = {}) {
   const app = new Hono();
   const mode = options.mode ?? "local";
+  const afterSync = () => {
+    options.afterSync?.().catch((err) => console.error("After-sync step failed:", err));
+  };
 
   if (options.allowedOrigins) {
     const origins = new Set(options.allowedOrigins);
@@ -113,6 +122,7 @@ export function createApp(deps: CoreDeps, options: AppOptions = {}) {
       institution: { id: institution.id ?? null, name: institution.name ?? null },
       confirmSlot: body.confirm_slot === true,
     });
+    afterSync();
     return c.json(result);
   });
 
@@ -121,7 +131,11 @@ export function createApp(deps: CoreDeps, options: AppOptions = {}) {
     return c.json({ ok: true });
   });
 
-  app.post("/api/connections/:id/reconnect", async (c) => c.json(await reconnect(deps, c.req.param("id"))));
+  app.post("/api/connections/:id/reconnect", async (c) => {
+    const result = await reconnect(deps, c.req.param("id"));
+    afterSync();
+    return c.json(result);
+  });
 
   app.post("/api/sync", async (c) => {
     const body = await readJson(c.req.raw);
@@ -129,6 +143,7 @@ export function createApp(deps: CoreDeps, options: AppOptions = {}) {
       typeof body.connection_id === "string"
         ? [await syncConnection(deps, body.connection_id, "manual")]
         : await syncAll(deps, "manual");
+    afterSync();
     return c.json({ results });
   });
 

@@ -11,7 +11,10 @@ export interface RawArchiveEntry {
   env: string;
   /** Request parameters needed to replay. Never contains secrets. */
   request: Record<string, unknown>;
+  /** The response body, or null when Plaid answered with an error. */
   response: unknown;
+  /** Plaid's error answer, archived too so a replay fails where the live sync failed. */
+  error?: { status: number; error_type: string; error_code: string; error_message: string };
 }
 
 export interface RawArchive {

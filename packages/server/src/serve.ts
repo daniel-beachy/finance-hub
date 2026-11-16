@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createApp } from "@finance-hub/core";
+import { runBackup } from "./backup.ts";
 import type { AppContext } from "./context.ts";
 
 export const DEFAULT_PORT = 5202;
@@ -15,7 +16,11 @@ export function buildServerApp(ctx: AppContext, port: number) {
   if (process.env.FH_DEV === "1") {
     allowedOrigins.push(`http://127.0.0.1:${DEV_WEB_PORT}`, `http://localhost:${DEV_WEB_PORT}`);
   }
-  const app = createApp(ctx.deps, { allowedOrigins, mode: "local" });
+  const app = createApp(ctx.deps, {
+    allowedOrigins,
+    mode: "local",
+    afterSync: () => runBackup(ctx.deps, ctx.paths),
+  });
   const dist = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "web", "dist");
   if (existsSync(dist)) {
     app.use("*", serveStatic({ root: dist }));

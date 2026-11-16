@@ -100,3 +100,20 @@ describe("API routes", () => {
     expect((await call("/api/nope")).status).toBe(404);
   });
 });
+
+describe("after-sync hook", () => {
+  it("runs in the background after a dashboard sync, and its failure never fails the request", async () => {
+    const { deps } = await makeDeps(fakePlaid({}).fetch);
+    let calls = 0;
+    const app = createApp(deps, {
+      afterSync: async () => {
+        calls++;
+        throw new Error("backup broke");
+      },
+    });
+    const res = await app.request("/api/sync", { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ results: [] });
+    expect(calls).toBe(1);
+  });
+});

@@ -72,8 +72,7 @@ export async function syncConnection(
   connectionId: string,
   trigger: SyncTrigger = "manual",
 ): Promise<SyncResult> {
-  const { db } = deps;
-  const conn = await first<ConnectionRow>(db, "SELECT * FROM connections WHERE id = ?", [connectionId]);
+  const conn = await first<ConnectionRow>(deps.db, "SELECT * FROM connections WHERE id = ?", [connectionId]);
   if (conn?.source !== "plaid" || !conn.plaid_env) {
     throw new Error(`No Plaid connection with id ${connectionId}`);
   }
@@ -87,6 +86,88 @@ export async function syncConnection(
   };
   if (conn.status === "removed") return { ...result, status: "skipped" };
 
+  return runSync(deps, conn, result, trigger, async () => {
+    const client = await plaidClientFor(deps, conn.plaid_env!);
+    const token = await deps.secrets.get(tokenNameForConnection(connectionId));
+    if (!token) throw new Error("The access token for this connection is missing from the secret store");
+    return liveSource(deps, connectionId, client, token);
+  });
+}
+
+/** Sync a connection from recorded answers instead of the API. Used by replay. */
+export async function runRecordedSync(deps: CoreDeps, connectionId: string, source: PlaidSource): Promise<SyncResult> {
+  const conn = await first<ConnectionRow>(deps.db, "SELECT * FROM connections WHERE id = ?", [connectionId]);
+  if (conn?.source !== "plaid") throw new Error(`No Plaid connection with id ${connectionId}`);
+  const result: SyncResult = { connectionId, institution: conn.institution_name, status: "ok", added: 0, modified: 0, removed: 0 };
+  return runSync(deps, conn, result, "manual", async () => source);
+}
+
+/**
+ * Where a sync reads Plaid data from: the live API, which archives every
+ * response first, or the raw archive itself during a replay. Both feed the
+ * same apply code, so a replay is a real sync with recorded answers.
+ */
+export interface PlaidSource {
+  itemGet(): Promise<{ item: PlaidItem }>;
+  accountsGet(): Promise<{ accounts: PlaidAccount[] }>;
+  transactionsSync(cursor: string | null): Promise<TransactionsSyncResponse>;
+  investmentsHoldingsGet(): Promise<HoldingsResponse>;
+  investmentsTransactionsGet(start: string, end: string, offset: number): Promise<InvestmentTransactionsResponse>;
+}
+
+/**
+ * The live API. Every answer, including a Plaid error, is written to the raw
+ * archive before it is returned, so nothing reaches the database unarchived
+ * and a replay sees exactly what the live sync saw.
+ */
+function liveSource(deps: CoreDeps, connectionId: string, client: PlaidClient, token: string): PlaidSource {
+  const fetched = async <T>(endpoint: string, request: Record<string, unknown>, call: () => Promise<T>) => {
+    const entry = { provider: "plaid" as const, connectionId, endpoint, env: client.env, request };
+    let response: T;
+    try {
+      response = await call();
+    } catch (err) {
+      if (err instanceof PlaidError) {
+        await deps.archive.write({
+          ...entry,
+          fetchedAt: deps.now().toISOString(),
+          response: null,
+          error: {
+            status: err.status,
+            error_type: err.errorType,
+            error_code: err.errorCode,
+            error_message: err.errorMessage,
+          },
+        });
+      }
+      throw err;
+    }
+    await deps.archive.write({ ...entry, fetchedAt: deps.now().toISOString(), response });
+    return response;
+  };
+  return {
+    itemGet: () => fetched("/item/get", {}, () => client.itemGet(token)),
+    accountsGet: () => fetched("/accounts/get", {}, () => client.accountsGet(token)),
+    transactionsSync: (cursor) =>
+      fetched("/transactions/sync", { cursor }, () => client.transactionsSync(token, cursor)),
+    investmentsHoldingsGet: () => fetched("/investments/holdings/get", {}, () => client.investmentsHoldingsGet(token)),
+    investmentsTransactionsGet: (start, end, offset) =>
+      fetched("/investments/transactions/get", { start_date: start, end_date: end, offset }, () =>
+        client.investmentsTransactionsGet(token, start, end, offset),
+      ),
+  };
+}
+
+/** Run one sync for a connection: read everything from `openSource`, then apply it in one transaction. */
+async function runSync(
+  deps: CoreDeps,
+  conn: ConnectionRow,
+  result: SyncResult,
+  trigger: SyncTrigger,
+  openSource: () => Promise<PlaidSource>,
+): Promise<SyncResult> {
+  const { db } = deps;
+  const connectionId = conn.id;
   const runId = deps.newId();
   await db.run(
     "INSERT INTO sync_runs (id, started_at, trigger, connection_id, status) VALUES (?, ?, ?, ?, 'running')",
@@ -94,26 +175,8 @@ export async function syncConnection(
   );
 
   try {
-    const client = await plaidClientFor(deps, conn.plaid_env);
-    const token = await deps.secrets.get(tokenNameForConnection(connectionId));
-    if (!token) throw new Error("The access token for this connection is missing from the secret store");
-
-    // Fetch, then archive, then return: nothing reaches the database unarchived.
-    const fetched = async <T>(endpoint: string, request: Record<string, unknown>, call: () => Promise<T>) => {
-      const response = await call();
-      await deps.archive.write({
-        provider: "plaid",
-        connectionId,
-        endpoint,
-        fetchedAt: deps.now().toISOString(),
-        env: client.env,
-        request,
-        response,
-      });
-      return response;
-    };
-
-    const { item } = await fetched("/item/get", {}, () => client.itemGet(token));
+    const source = await openSource();
+    const { item } = await source.itemGet();
     if (item.error?.error_code === "ITEM_LOGIN_REQUIRED") {
       throw new PlaidError("/item/get", 400, {
         error_code: "ITEM_LOGIN_REQUIRED",
@@ -121,10 +184,10 @@ export async function syncConnection(
       });
     }
 
-    const { accounts } = await fetched("/accounts/get", {}, () => client.accountsGet(token));
+    const { accounts } = await source.accountsGet();
 
     const pages = hasProduct(item, "transactions", true)
-      ? await fetchTransactionPages(client, token, conn.transactions_cursor, fetched)
+      ? await fetchTransactionPages(source, conn.transactions_cursor)
       : null;
 
     const wantsInvestments = hasProduct(
@@ -132,7 +195,7 @@ export async function syncConnection(
       "investments",
       accounts.some((a) => normalizeAccountType(a.type) === "investment"),
     );
-    const investments = wantsInvestments ? await fetchInvestments(deps, client, token, connectionId, fetched) : null;
+    const investments = wantsInvestments ? await fetchInvestments(deps, source, connectionId) : null;
 
     await db.transaction(async () => {
       const nowIso = deps.now().toISOString();
@@ -228,28 +291,21 @@ function hasProduct(item: PlaidItem, product: string, fallback: boolean): boolea
   return listed.includes(product);
 }
 
-type Fetched = <T>(endpoint: string, request: Record<string, unknown>, call: () => Promise<T>) => Promise<T>;
-
 /**
  * Read every page after `startCursor`. If Plaid reports that data changed
  * mid-pagination, throw the pages away and start again from `startCursor`.
  * The cursor is only persisted by the caller once all pages are applied.
  */
 async function fetchTransactionPages(
-  client: PlaidClient,
-  token: string,
+  source: PlaidSource,
   startCursor: string | null,
-  fetched: Fetched,
 ): Promise<{ pages: TransactionsSyncResponse[]; cursor: string | null }> {
   for (let attempt = 0; ; attempt++) {
     const pages: TransactionsSyncResponse[] = [];
     let cursor = startCursor;
     try {
       for (;;) {
-        const requestCursor = cursor;
-        const page = await fetched("/transactions/sync", { cursor: requestCursor }, () =>
-          client.transactionsSync(token, requestCursor),
-        );
+        const page = await source.transactionsSync(cursor);
         pages.push(page);
         // An empty next_cursor means Plaid has no data yet; keep the old cursor.
         if (page.next_cursor) cursor = page.next_cursor;
@@ -472,13 +528,11 @@ interface InvestmentData {
 
 async function fetchInvestments(
   deps: CoreDeps,
-  client: PlaidClient,
-  token: string,
+  source: PlaidSource,
   connectionId: string,
-  fetched: Fetched,
 ): Promise<InvestmentData | null> {
   try {
-    const holdings = await fetched("/investments/holdings/get", {}, () => client.investmentsHoldingsGet(token));
+    const holdings = await source.investmentsHoldingsGet();
     const seen = await first<{ n: number }>(
       deps.db,
       `SELECT COUNT(*) AS n FROM investment_transactions
@@ -491,9 +545,7 @@ async function fetchInvestments(
     const securities = [...holdings.securities];
     for (;;) {
       const offset = transactions.length;
-      const page = await fetched("/investments/transactions/get", { start_date: start, end_date: end, offset }, () =>
-        client.investmentsTransactionsGet(token, start, end, offset),
-      );
+      const page = await source.investmentsTransactionsGet(start, end, offset);
       transactions.push(...page.investment_transactions);
       securities.push(...page.securities);
       if (page.investment_transactions.length === 0 || transactions.length >= page.total_investment_transactions) {

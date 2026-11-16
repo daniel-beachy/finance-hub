@@ -15,6 +15,7 @@ export class PlaidError extends Error {
   readonly status: number;
   readonly errorType: string;
   readonly errorCode: string;
+  readonly errorMessage: string;
   readonly requestId: string | null;
   readonly endpoint: string;
 
@@ -25,11 +26,12 @@ export class PlaidError extends Error {
     this.status = status;
     this.errorType = body.error_type ?? "UNKNOWN";
     this.errorCode = body.error_code ?? `HTTP_${status}`;
+    this.errorMessage = body.error_message ?? "";
     this.requestId = body.request_id ?? null;
   }
 }
 
-interface PlaidErrorBody {
+export interface PlaidErrorBody {
   error_type: string;
   error_code: string;
   error_message: string;

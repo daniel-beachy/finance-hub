@@ -132,7 +132,14 @@ describe("syncing against recorded Sandbox responses", () => {
     await completeLink(ctx.deps, { publicToken: "p", institution: { name: "Bank" } });
     expect(seenAtArchiveTime).toEqual([0]);
     expect(await count(ctx.deps.db)).toBe(1);
-    expect(ctx.archive.entries.map((e) => e.endpoint)).toEqual(["/item/get", "/accounts/get", "/transactions/sync"]);
+    expect(ctx.archive.entries.map((e) => e.endpoint)).toEqual([
+      "/item/get",
+      "/accounts/get",
+      "/transactions/sync",
+      "/investments/holdings/get",
+    ]);
+    // Plaid's error answers are archived too, so a replay fails where the live sync did.
+    expect(ctx.archive.entries[3]).toMatchObject({ response: null, error: { error_code: "PRODUCTS_NOT_SUPPORTED" } });
     // Request metadata is kept for replay, but never the keys or the token.
     const text = JSON.stringify(ctx.archive.entries);
     expect(text).not.toContain("access-sandbox-test");

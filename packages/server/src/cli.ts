@@ -1,5 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import {
   completeLink,
@@ -24,7 +26,19 @@ import {
   tokenNameForConnection,
 } from "@finance-hub/core";
 import initSqlJs from "sql.js";
-import { openContext } from "./context.ts";
+import { type BackupResult, runBackup } from "./backup.ts";
+import { type AppContext, openContext } from "./context.ts";
+import { replayToFile, restoreDatabase } from "./recovery.ts";
+import {
+  defaultPlistOptions,
+  installSchedule,
+  notify,
+  PLIST,
+  plistFor,
+  SYNC_HOUR,
+  SYNC_MINUTE,
+  uninstallSchedule,
+} from "./schedule.ts";
 import { DEFAULT_PORT, startServer } from "./serve.ts";
 
 const HELP = `fh: Finance Hub
@@ -33,8 +47,15 @@ const HELP = `fh: Finance Hub
   fh setup                      Check Plaid keys in the Keychain; prompt for missing ones
   fh env [sandbox|production]   Show or set which Plaid environment new links use
   fh status                     Connections, slots used and recent sync runs
-  fh sync [connection-id]       Sync all connections (or one), then import the inbox
+  fh sync [connection-id]       Sync all connections (or one); a full sync also imports
+                                the inbox and runs the backup
   fh import                     Import files waiting in the inbox
+  fh backup                     Back up the database now (local copy and iCloud Drive)
+  fh restore <file> [--yes]     Replace the database with a backup; keeps the old one
+  fh replay [--out FILE]        Rebuild Plaid data from the raw archive into a new file
+                                and compare it with the live database
+  fh install [--print]          Run "fh sync" every day at 06:30 (launchd)
+  fh uninstall                  Stop the daily sync
   fh serve [--port N]           Start the local dashboard and API
   fh sandbox-link [ins_id]      Create a Plaid Sandbox connection (no real bank)
   fh sandbox-break <id>         Force a Sandbox connection to need sign-in again (for testing)
@@ -58,6 +79,16 @@ export async function main(argv: string[]): Promise<number> {
       return sync(flags.positional[0], flags.named.trigger);
     case "import":
       return importCommand();
+    case "backup":
+      return backupCommand();
+    case "restore":
+      return restoreCommand(flags.positional[0], "yes" in flags.named);
+    case "replay":
+      return replayCommand(flags.named.out);
+    case "install":
+      return installCommand("print" in flags.named);
+    case "uninstall":
+      return uninstallCommand();
     case "serve":
       return serveCommand(Number(flags.named.port) || DEFAULT_PORT);
     case "sandbox-link":
@@ -77,12 +108,17 @@ export async function main(argv: string[]): Promise<number> {
   }
 }
 
+const BOOLEAN_FLAGS = new Set(["yes", "print"]);
+
 function parseFlags(args: string[]): { positional: string[]; named: Record<string, string> } {
   const positional: string[] = [];
   const named: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg.startsWith("--")) named[arg.slice(2)] = args[++i] ?? "";
+    if (arg.startsWith("--")) {
+      const key = arg.slice(2);
+      named[key] = BOOLEAN_FLAGS.has(key) ? "true" : (args[++i] ?? "");
+    }
     else positional.push(arg);
   }
   return { positional, named };
@@ -216,11 +252,12 @@ async function status(): Promise<number> {
 
 async function sync(connectionId: string | undefined, trigger: string | undefined): Promise<number> {
   const ctx = await openContext();
+  const scheduled = trigger === "schedule";
   try {
-    const how = trigger === "schedule" ? "schedule" : "manual";
+    if (scheduled) console.log(`\n=== Scheduled sync ${new Date().toString()}`);
     const results = connectionId
-      ? [await syncConnection(ctx.deps, connectionId, how)]
-      : await syncAll(ctx.deps, how);
+      ? [await syncConnection(ctx.deps, connectionId, scheduled ? "schedule" : "manual")]
+      : await syncAll(ctx.deps, scheduled ? "schedule" : "manual");
     if (results.length === 0) console.log("No connections to sync.");
     for (const r of results) {
       console.log(
@@ -229,13 +266,162 @@ async function sync(connectionId: string | undefined, trigger: string | undefine
       );
     }
     const failed = results.some((r) => r.status === "error" || r.status === "login_required");
-    // The plan runs the inbox as part of every full sync.
+    // The plan runs the inbox, then the backup, as part of every full sync.
     const imported = connectionId ? [] : await processInbox(ctx.deps);
     printOutcomes(imported, false);
-    return failed || imported.some(importFailed) ? 1 : 0;
+    const backup = connectionId ? null : await backupAndReport(ctx);
+    if (scheduled) {
+      for (const r of results) {
+        if (r.status === "login_required") await notify(`${r.institution} needs you to sign in again. Open Finance Hub, Accounts.`);
+        else if (r.status === "error") await notify(`${r.institution} didn't sync (${r.errorCode ?? "error"}). It tries again tomorrow.`);
+      }
+      const waiting = imported.filter((o) => o.status !== "imported" && o.status !== "duplicate").length;
+      if (waiting) await notify(`${waiting} file${waiting === 1 ? "" : "s"} in the inbox need${waiting === 1 ? "s" : ""} you. Open Finance Hub, Accounts.`);
+      if (backup?.icloudError) await notify(`The iCloud backup copy failed: ${backup.icloudError}`);
+      for (const c of await expiringConsents(ctx)) {
+        await notify(`${c.institution_name}'s Plaid access expires ${c.consent_expires_at.slice(0, 10)}. Reconnect it in Finance Hub before then.`);
+      }
+    }
+    return failed || imported.some(importFailed) || backup?.icloudError ? 1 : 0;
+  } catch (err) {
+    if (scheduled) await notify(`The daily sync failed: ${err instanceof Error ? err.message : String(err)}`);
+    throw err;
   } finally {
     ctx.close();
   }
+}
+
+/** Connections whose Plaid consent ends within two weeks. */
+async function expiringConsents(ctx: AppContext) {
+  const soon = new Date(Date.now() + 14 * 86_400_000).toISOString();
+  return ctx.deps.db.all<{ institution_name: string; consent_expires_at: string }>(
+    `SELECT institution_name, consent_expires_at FROM connections
+     WHERE source = 'plaid' AND status != 'removed' AND consent_expires_at IS NOT NULL AND consent_expires_at <= ?`,
+    [soon],
+  );
+}
+
+async function backupAndReport(ctx: AppContext): Promise<BackupResult> {
+  const result = await runBackup(ctx.deps, ctx.paths);
+  console.log(`Backup: ${result.local}`);
+  if (result.icloud) {
+    const extra = [
+      result.icloud.rawCopied && `${result.icloud.rawCopied} new raw files`,
+      result.icloud.importedCopied && `${result.icloud.importedCopied} new imported files`,
+    ].filter(Boolean);
+    console.log(`Copied to ${result.icloud.dir}${extra.length ? ` (${extra.join(", ")})` : ""}`);
+  } else {
+    console.log(`The iCloud copy failed: ${result.icloudError}`);
+  }
+  return result;
+}
+
+async function backupCommand(): Promise<number> {
+  const ctx = await openContext();
+  try {
+    const result = await backupAndReport(ctx);
+    return result.icloudError ? 1 : 0;
+  } finally {
+    ctx.close();
+  }
+}
+
+/** Is something listening on the dashboard's port? */
+function portInUse(port: number): Promise<boolean> {
+  return new Promise((done) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    socket.once("connect", () => {
+      socket.destroy();
+      done(true);
+    });
+    socket.once("error", () => done(false));
+  });
+}
+
+async function restoreCommand(file: string | undefined, yes: boolean): Promise<number> {
+  if (!file) {
+    console.error("Give the backup file to restore, e.g. fh restore <data>/backups/finance-2026-11-14.db");
+    return 2;
+  }
+  if (await portInUse(DEFAULT_PORT)) {
+    console.error(`Something is running on port ${DEFAULT_PORT}. Stop "fh serve" first.`);
+    return 1;
+  }
+  const ctx = await openContext();
+  const paths = ctx.paths;
+  ctx.close();
+  if (!yes) {
+    if (!process.stdin.isTTY) {
+      console.error("Add --yes to restore without a prompt.");
+      return 2;
+    }
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await rl.question(
+      `Replace ${paths.db} with ${resolve(file)}? The current database is kept as finance.db.before-restore. Type "restore" to go ahead: `,
+    );
+    rl.close();
+    if (answer.trim() !== "restore") {
+      console.log("Nothing changed.");
+      return 1;
+    }
+  }
+  const result = await restoreDatabase(paths, file, new Date());
+  console.log(`Restored from ${result.restoredFrom}`);
+  if (result.keptAs) console.log(`The replaced database is at ${result.keptAs}`);
+  return 0;
+}
+
+async function replayCommand(out: string | undefined): Promise<number> {
+  const ctx = await openContext();
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const target = out ?? join(ctx.paths.root, "replay", `replay-${stamp}.db`);
+    const report = await replayToFile(ctx.paths, ctx.deps.db, target);
+    if (report.connections.length === 0) {
+      console.log("The raw archive is empty: nothing to replay.");
+      return 0;
+    }
+    for (const c of report.connections) {
+      console.log(`${c.connectionId}: ${c.runs} archived syncs, ${c.applied} applied, ${c.skipped} that failed live too`);
+    }
+    console.log("\nPlaid transactions per account (live / replay):");
+    for (const a of report.accounts) {
+      const money = (n: number) => (n / 100).toFixed(2);
+      console.log(
+        `  ${a.matches ? "ok  " : "DIFF"}  ${a.name}: ${a.live.count} / ${a.replay.count} transactions, ` +
+          `${money(a.live.sum)} / ${money(a.replay.sum)}`,
+      );
+    }
+    console.log(`\nReplayed database: ${report.out}`);
+    console.log("Categories, notes, rules and file imports aren't in the raw archive. The database backups cover those.");
+    return report.accounts.every((a) => a.matches) ? 0 : 1;
+  } finally {
+    ctx.close();
+  }
+}
+
+async function installCommand(printOnly: boolean): Promise<number> {
+  const ctx = await openContext();
+  const options = defaultPlistOptions(join(ctx.paths.logs, "sync.log"));
+  ctx.close();
+  if (printOnly) {
+    console.log(plistFor(options));
+    return 0;
+  }
+  await installSchedule(options);
+  const time = `${String(SYNC_HOUR).padStart(2, "0")}:${String(SYNC_MINUTE).padStart(2, "0")}`;
+  console.log(`Installed ${PLIST}`);
+  console.log(`"fh sync" now runs every day at ${time}, or when the Mac wakes if it was asleep then.`);
+  console.log(`Log: ${options.log}`);
+  console.log('The job runs through /bin/bash, which needs Full Disk Access for the iCloud backup copy.');
+  await notify("The daily sync is installed. Notifications like this one tell you when something needs you.");
+  return 0;
+}
+
+async function uninstallCommand(): Promise<number> {
+  const removed = await uninstallSchedule();
+  console.log(removed ? "The daily sync is off. Data and backups were not touched." : "The daily sync wasn't installed.");
+  return 0;
 }
 
 async function importCommand(): Promise<number> {

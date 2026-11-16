@@ -697,6 +697,18 @@ Added while building M3 (file import):
 - **Parsers 2 to 4 were written from Fidelity's published export format**, before Dan's files were available. Their header rows still need checking against real downloads; NetBenefits is the least certain.
 - **The fingerprint for investment rows** adds ticker and quantity to the transaction fingerprint, so a buy and a dividend of the same amount on one day stay apart.
 
+Added while building M2's tooling (before any real institution was linked):
+
+- **Sync reads from a `PlaidSource`.** The live source calls Plaid and archives each answer first; replay's source answers from one recorded run of the archive. Both feed the same apply code (`runSync` in `packages/core/src/sync/sync.ts`), so a replay is a real sync with recorded answers.
+- **Plaid's error answers are archived too** (`response: null`, `error: {...}`). Without them a replay can't fail where the live sync failed, or skip investments where Plaid said "not supported".
+- **Replay splits the archive into runs at each `/item/get`**, sets the clock to each run's own time so balances and holdings land on their original days, and takes the latest answer when a request repeats in a run (a pagination restart). It writes a new file under `<data>/replay/` and never touches the live database, the network or the Keychain. Runs that failed live fail again and are reported as skipped.
+- **The replay check compares Plaid-sourced transactions only** (`source = 'plaid'`). File backfill on a Plaid account isn't in the raw archive.
+- **The backup also runs after a link, a reconnect or "Sync now" in the dashboard**, in the background (`AppOptions.afterSync`). A new connection's one-time history reaches iCloud right away, not the next morning.
+- **A failed iCloud copy raises a `connection`-kind alert with no connection and `data = "backup"`**, cleared by the next successful copy. M6's alert pages should show it.
+- **The launchd job runs through `/bin/bash -c '<node> <fh.js> sync --trigger schedule; exit $?'`**, not straight into node. It inherits the Full Disk Access granted to bash, which iCloud Drive needs, and the trailing `exit` stops bash from replacing itself with node. It points at `/opt/homebrew/bin/node` rather than the versioned Cellar path, so a `brew upgrade` doesn't break it.
+- **Notifications** cover sign-in needed, a failed sync, files waiting in the inbox, a failed iCloud copy, and Plaid consent ending within 14 days. Plaid's `PENDING_DISCONNECT` arrives only by webhook, which a local app can't receive, so the consent date stands in for it.
+- **`fh restore` moves each database with its `-wal` and `-shm` files**, so a stale write-ahead log can never be paired with a different database. It refuses to run while something listens on port 5202, and without `--yes` it needs a terminal to confirm.
+
 ## When the plan is wrong
 
 - If a fact in section 2 has changed, or an acceptance criterion can't be met as written, stop and tell Dan what changed and what you'd do instead. Don't quietly pick a different approach.
