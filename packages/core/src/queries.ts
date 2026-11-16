@@ -104,6 +104,12 @@ export interface TransactionFilter {
   to?: string;
   /** Limits to what is waiting in Review, optionally one tab of it. */
   review?: ReviewTab;
+  /** Case-insensitive text in the merchant name, its normalized key or the description. */
+  merchantLike?: string;
+  /** Bounds on the size of the amount, ignoring sign. */
+  minCents?: number;
+  maxCents?: number;
+  direction?: "in" | "out";
 }
 
 /** What a transaction is called on screen: the merchant if known, else the description. */
@@ -170,6 +176,20 @@ export async function listTransactions(
   if (opts.from) add("t.posted_date >= ?", opts.from);
   if (opts.to) add("t.posted_date <= ?", opts.to);
   if (opts.review) where.push(REVIEW_TAB_SQL[opts.review] ?? IN_REVIEW_SQL);
+  if (opts.minCents !== undefined) add("ABS(t.amount_cents) >= ?", opts.minCents);
+  if (opts.maxCents !== undefined) add("ABS(t.amount_cents) <= ?", opts.maxCents);
+  if (opts.direction === "in") where.push("t.amount_cents > 0");
+  if (opts.direction === "out") where.push("t.amount_cents < 0");
+  const ml = opts.merchantLike?.trim();
+  if (ml) {
+    const like = `%${ml.replace(/[\\%_]/g, "\\$&")}%`;
+    add(
+      `(t.merchant_raw LIKE ? ESCAPE '\\' OR t.description_raw LIKE ? ESCAPE '\\' OR t.merchant_id IN (SELECT id FROM merchants WHERE normalized_key LIKE ? ESCAPE '\\'))`,
+      like,
+      like,
+      like,
+    );
+  }
   const q = opts.q?.trim();
   if (q) {
     const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;

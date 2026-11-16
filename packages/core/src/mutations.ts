@@ -104,17 +104,61 @@ interface Snapshot {
   excluded: number;
   transfer_group_id: string | null;
   transfer_kind: string | null;
+  tags: string[];
+}
+
+async function tagsOf(db: SqlDriver, id: string): Promise<string[]> {
+  const rows = await db.all<{ name: string }>(
+    "SELECT g.name FROM transaction_tags tt JOIN tags g ON g.id = tt.tag_id WHERE tt.transaction_id = ? ORDER BY g.name",
+    [id],
+  );
+  return rows.map((r) => r.name);
+}
+
+/** Clean a tag list: trimmed, one space between words, no duplicates ignoring case, sorted. */
+export function cleanTags(input: unknown): string[] {
+  if (!Array.isArray(input)) throw new InvalidInput("tags must be a list of names");
+  const seen = new Map<string, string>();
+  for (const raw of input) {
+    if (typeof raw !== "string") throw new InvalidInput("tags must be a list of names");
+    const name = raw.trim().replace(/\s+/g, " ");
+    if (!name) continue;
+    if (name.length > 40) throw new InvalidInput("A tag can be at most 40 characters");
+    if (!seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+  }
+  if (seen.size > 20) throw new InvalidInput("At most 20 tags on one transaction");
+  return [...seen.values()].sort();
+}
+
+/** Replace a transaction's tags. A tag that exists under another case is reused. */
+async function writeTags(deps: Deps, id: string, tags: string[]): Promise<void> {
+  const { db } = deps;
+  await db.run("DELETE FROM transaction_tags WHERE transaction_id = ?", [id]);
+  for (const name of tags) {
+    let tagId = (await first<{ id: string }>(db, "SELECT id FROM tags WHERE name = ? COLLATE NOCASE", [name]))?.id;
+    if (!tagId) {
+      tagId = deps.newId();
+      await db.run("INSERT INTO tags (id, name) VALUES (?, ?)", [tagId, name]);
+    }
+    await db.run("INSERT OR IGNORE INTO transaction_tags (transaction_id, tag_id) VALUES (?, ?)", [id, tagId]);
+  }
+  await db.run("DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM transaction_tags)");
 }
 
 async function snapshot(db: SqlDriver, id: string): Promise<Snapshot | undefined> {
-  const row = await first<Omit<Snapshot, "review_reasons"> & { review_reasons: string | null }>(
+  const row = await first<Omit<Snapshot, "review_reasons" | "tags"> & { review_reasons: string | null }>(
     db,
     `SELECT t.category_id, t.category_source, t.rule_id, t.needs_review, t.note, t.flag, t.reviewed_at,
        t.review_reasons, t.excluded, t.transfer_group_id, g.kind AS transfer_kind
      FROM transactions t LEFT JOIN transfer_groups g ON g.id = t.transfer_group_id WHERE t.id = ?`,
     [id],
   );
-  return row && { ...row, review_reasons: row.review_reasons ? (JSON.parse(row.review_reasons) as string[]) : null };
+  if (!row) return undefined;
+  return {
+    ...row,
+    review_reasons: row.review_reasons ? (JSON.parse(row.review_reasons) as string[]) : null,
+    tags: await tagsOf(db, id),
+  };
 }
 
 export interface TransactionPatch {
@@ -125,6 +169,8 @@ export interface TransactionPatch {
   flag?: "suspicious" | "disputed" | "resolved" | null;
   /** Leave it out of every total. */
   excluded?: boolean;
+  /** The full set of tags; replaces what is there. */
+  tags?: string[];
 }
 
 /** Apply a patch and log it. The caller settles afterwards. */
@@ -160,10 +206,13 @@ async function patchTransaction(deps: Deps, batch: Batch, id: string, patch: Tra
     assign("flag", patch.flag);
   }
   if (patch.excluded !== undefined) assign("excluded", patch.excluded ? 1 : 0);
-  if (set.length === 0) return;
+  const tags = patch.tags === undefined ? undefined : cleanTags(patch.tags);
+  const tagsChange = tags !== undefined && JSON.stringify(tags) !== JSON.stringify(before.tags);
+  if (set.length === 0 && !tagsChange) return;
 
   assign("updated_at", now);
   await db.run(`UPDATE transactions SET ${set.join(", ")} WHERE id = ?`, [...params, id]);
+  if (tagsChange) await writeTags(deps, id, tags);
   await log(deps, batch, "transaction", id, before, await snapshot(db, id));
   if (patch.category_id !== undefined && remember) await rememberMerchant(deps, batch, id);
 }
@@ -224,6 +273,23 @@ export async function updateTransaction(
     const view = (await getTransaction(deps.db, id))!;
     // No batch when nothing changed, so there is nothing to undo.
     return { ...view, batch_id: batch.changeIds.length ? batch.id : null, change_ids: batch.changeIds };
+  });
+}
+
+/** The same patch on many transactions, as one undoable batch. */
+export async function patchTransactions(
+  deps: Deps,
+  ids: string[],
+  patch: TransactionPatch,
+  actor: Actor = "user",
+  options: Pick<EditOptions, "remember"> & { tool?: string } = {},
+): Promise<EditResult & { updated: number }> {
+  if (ids.length === 0) throw new InvalidInput("Give at least one transaction id");
+  if (ids.length > 500) throw new InvalidInput("At most 500 transactions at a time");
+  return inBatch(deps, actor, options.tool ?? "update_transaction", async (batch) => {
+    for (const id of ids) await patchTransaction(deps, batch, id, patch, options.remember ?? true);
+    if (batch.changeIds.length) await settle(deps);
+    return { ...done(batch), updated: ids.length };
   });
 }
 
@@ -507,6 +573,164 @@ export async function unmarkTransfer(deps: Deps, id: string, options: { actor?: 
 }
 
 // ---------------------------------------------------------------------------
+// Splits
+
+export interface SplitPart {
+  amount_cents: number;
+  category_id: string;
+  note?: string | null;
+}
+
+/** A split child as stored in `changes`, enough to put it back exactly. */
+interface SplitChild {
+  id: string;
+  account_id: string;
+  source: string;
+  external_id: string;
+  pending: number;
+  posted_date: string;
+  authorized_date: string | null;
+  amount_cents: number;
+  currency: string;
+  description_raw: string;
+  merchant_raw: string | null;
+  merchant_id: string | null;
+  category_id: string | null;
+  category_source: string | null;
+  parent_id: string;
+  note: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const CHILD_COLUMNS = [
+  "id",
+  "account_id",
+  "source",
+  "external_id",
+  "pending",
+  "posted_date",
+  "authorized_date",
+  "amount_cents",
+  "currency",
+  "description_raw",
+  "merchant_raw",
+  "merchant_id",
+  "category_id",
+  "category_source",
+  "parent_id",
+  "note",
+  "reviewed_at",
+  "created_at",
+  "updated_at",
+] as const;
+
+async function childrenOf(db: SqlDriver, parentId: string): Promise<SplitChild[]> {
+  return db.all<SplitChild>(
+    `SELECT ${CHILD_COLUMNS.join(", ")} FROM transactions WHERE parent_id = ? ORDER BY external_id`,
+    [parentId],
+  );
+}
+
+async function insertChild(db: SqlDriver, c: SplitChild): Promise<void> {
+  await db.run(
+    `INSERT INTO transactions (${CHILD_COLUMNS.join(", ")}) VALUES (${CHILD_COLUMNS.map(() => "?").join(", ")})`,
+    CHILD_COLUMNS.map((k) => c[k]),
+  );
+}
+
+async function removeChildren(db: SqlDriver, parentId: string): Promise<void> {
+  await db.run("DELETE FROM transaction_tags WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?)", [parentId]);
+  await db.run("DELETE FROM transactions WHERE parent_id = ?", [parentId]);
+}
+
+/**
+ * Split one transaction into parts that each carry their own category, such
+ * as one store receipt that was half groceries and half household. The parts
+ * must add up to the original amount, to the cent. The original stays, marked
+ * as split, and drops out of every total; the parts take its place. An empty
+ * `parts` list removes a split. Undo puts back whatever was there before.
+ */
+export async function splitTransaction(
+  deps: Deps,
+  id: string,
+  parts: SplitPart[],
+  actor: Actor = "user",
+): Promise<EditResult & { children: string[] }> {
+  const { db } = deps;
+  return inBatch(deps, actor, "split_transaction", async (batch) => {
+    const parent = await first<{
+      account_id: string;
+      source: string;
+      external_id: string;
+      pending: number;
+      posted_date: string;
+      authorized_date: string | null;
+      amount_cents: number;
+      currency: string;
+      description_raw: string;
+      merchant_raw: string | null;
+      merchant_id: string | null;
+      parent_id: string | null;
+      removed_at: string | null;
+      transfer_group_id: string | null;
+    }>(db, "SELECT * FROM transactions WHERE id = ?", [id]);
+    if (!parent || parent.removed_at) throw new NotFound(`No transaction with id ${id}`);
+    if (parent.parent_id) throw new InvalidInput("That is already one part of a split; split the original instead");
+    if (parent.transfer_group_id) throw new InvalidInput("A transfer can't be split; unpair it first");
+    if (parts.length === 1) throw new InvalidInput("A split needs at least two parts");
+    if (parts.length > 20) throw new InvalidInput("At most 20 parts");
+    let sum = 0;
+    for (const part of parts) {
+      if (!Number.isInteger(part.amount_cents) || part.amount_cents === 0) throw new InvalidInput("Each part needs a whole, non-zero number of cents");
+      if (Math.sign(part.amount_cents) !== Math.sign(parent.amount_cents)) throw new InvalidInput("Each part must have the same sign as the original");
+      if (typeof part.note === "string" && part.note.length > 2000) throw new InvalidInput("A note can be at most 2,000 characters");
+      await requireCategory(db, part.category_id);
+      sum += part.amount_cents;
+    }
+    if (parts.length && sum !== parent.amount_cents) {
+      throw new InvalidInput(`The parts add up to ${sum} cents but the transaction is ${parent.amount_cents}`);
+    }
+
+    const before = await childrenOf(db, id);
+    if (before.length === 0 && parts.length === 0) throw new InvalidInput("That transaction isn't split");
+    await removeChildren(db, id);
+    const now = deps.now().toISOString();
+    const source = actor === "claude" ? "claude" : "manual";
+    for (const [i, part] of parts.entries()) {
+      await insertChild(db, {
+        id: deps.newId(),
+        account_id: parent.account_id,
+        source: "manual",
+        external_id: `${parent.external_id}#split-${batch.id}-${i + 1}`,
+        pending: parent.pending,
+        posted_date: parent.posted_date,
+        authorized_date: parent.authorized_date,
+        amount_cents: part.amount_cents,
+        currency: parent.currency,
+        description_raw: parent.description_raw,
+        merchant_raw: parent.merchant_raw,
+        merchant_id: parent.merchant_id,
+        category_id: part.category_id,
+        category_source: source,
+        parent_id: id,
+        note: part.note?.trim() || null,
+        // Splitting is a decision about the charge, so the parts don't wait in Review.
+        reviewed_at: now,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+    await db.run("UPDATE transactions SET is_split_parent = ?, updated_at = ? WHERE id = ?", [parts.length ? 1 : 0, now, id]);
+    const after = await childrenOf(db, id);
+    await log(deps, batch, "split", id, { children: before }, { children: after });
+    await settle(deps);
+    return { ...done(batch), children: after.map((c) => c.id) };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Undo
 
 export interface UndoResult {
@@ -526,7 +750,7 @@ interface ChangeRow {
 }
 
 /** Fields that show a person's intent. If one moved since the change, undoing would clobber newer work. */
-const INTENT: (keyof Snapshot)[] = ["category_id", "category_source", "note", "flag", "excluded", "reviewed_at", "transfer_group_id"];
+const INTENT: (keyof Snapshot)[] = ["category_id", "category_source", "note", "flag", "excluded", "reviewed_at", "transfer_group_id", "tags"];
 const RESTORABLE: (keyof Snapshot)[] = [
   "category_id",
   "category_source",
@@ -558,7 +782,7 @@ export async function undo(deps: Deps, changeOrBatchId: string): Promise<UndoRes
     const result: UndoResult = { undone: [], skipped: [] };
     const now = deps.now().toISOString();
     for (const row of rows) {
-      const reason = row.undone_at ? "already undone" : await reverse(db, row, now);
+      const reason = row.undone_at ? "already undone" : await reverseChange(deps, row, now);
       if (reason) {
         result.skipped.push({ change_id: row.id, reason });
         continue;
@@ -576,7 +800,8 @@ export async function undo(deps: Deps, changeOrBatchId: string): Promise<UndoRes
 }
 
 /** Put one entity back. Returns why not, or null when done. */
-async function reverse(db: SqlDriver, row: ChangeRow, now: string): Promise<string | null> {
+async function reverseChange(deps: Deps, row: ChangeRow, now: string): Promise<string | null> {
+  const { db } = deps;
   const before = row.before ? JSON.parse(row.before) : null;
   const after = row.after ? JSON.parse(row.after) : null;
   switch (row.entity) {
@@ -601,6 +826,19 @@ async function reverse(db: SqlDriver, row: ChangeRow, now: string): Promise<stri
         now,
         row.entity_id,
       ]);
+      if ("tags" in before) await writeTags(deps, row.entity_id, before.tags as string[]);
+      return null;
+    }
+    case "split": {
+      const parent = await first<{ is_split_parent: number }>(db, "SELECT is_split_parent FROM transactions WHERE id = ?", [row.entity_id]);
+      if (!parent) return "the transaction no longer exists";
+      const children = await db.all<{ id: string }>("SELECT id FROM transactions WHERE parent_id = ?", [row.entity_id]);
+      const expected = ((after?.children ?? []) as SplitChild[]).map((c) => c.id).sort();
+      if (JSON.stringify(children.map((c) => c.id).sort()) !== JSON.stringify(expected)) return "the split was changed again afterwards";
+      await removeChildren(db, row.entity_id);
+      const restore = (before?.children ?? []) as SplitChild[];
+      for (const child of restore) await insertChild(db, child);
+      await db.run("UPDATE transactions SET is_split_parent = ?, updated_at = ? WHERE id = ?", [restore.length ? 1 : 0, now, row.entity_id]);
       return null;
     }
     case "merchant": {

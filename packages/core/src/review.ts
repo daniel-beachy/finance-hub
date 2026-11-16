@@ -76,6 +76,9 @@ export async function refreshReviewQueue(db: SqlDriver, since?: string): Promise
     if (next !== row.review_reasons) updates.push([row.id, next]);
   }
 
+  // A split original is replaced by its parts and never waits in Review itself.
+  await db.run("UPDATE transactions SET review_reasons = NULL WHERE is_split_parent = 1 AND review_reasons IS NOT NULL");
+
   if (updates.length) {
     await db.transaction(async () => {
       for (const [id, reasons] of updates) {

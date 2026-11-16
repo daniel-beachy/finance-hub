@@ -110,6 +110,57 @@ export async function scheduleLoaded(): Promise<boolean> {
   );
 }
 
+// ---------------------------------------------------------------------------
+// The MCP server's registration with Claude
+
+export const MCP_NAME = "finance-hub";
+export const CLAUDE_DESKTOP_CONFIG = join(homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
+
+export interface McpLaunch {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+/** How Claude starts `fh mcp`: the same node and fh.js as the daily sync. */
+export function mcpLaunch(o: Pick<PlistOptions, "node" | "bin" | "dataDir">): McpLaunch {
+  return { command: o.node, args: [o.bin, "mcp"], env: o.dataDir ? { FH_DATA_DIR: o.dataDir } : {} };
+}
+
+/** The block to paste under "mcpServers" in Claude desktop's config. */
+export function desktopConfigBlock(launch: McpLaunch): string {
+  const entry: Record<string, unknown> = { command: launch.command, args: launch.args };
+  if (Object.keys(launch.env).length) entry.env = launch.env;
+  return JSON.stringify({ mcpServers: { [MCP_NAME]: entry } }, null, 2);
+}
+
+/** Arguments for `claude mcp add`, user scope, so every project sees it. */
+export function claudeAddArgs(launch: McpLaunch): string[] {
+  const env = Object.entries(launch.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
+  return ["mcp", "add", "--scope", "user", ...env, MCP_NAME, "--", launch.command, ...launch.args];
+}
+
+/**
+ * Register with Claude Code. Replaces an earlier registration of the same
+ * name, so running install again picks up a moved repo or a new node.
+ * Returns null when it worked, else why not (the caller prints the command).
+ */
+export async function registerWithClaudeCode(launch: McpLaunch): Promise<string | null> {
+  try {
+    await run("claude", ["--version"]);
+  } catch {
+    return "the claude command isn't on PATH";
+  }
+  await run("claude", ["mcp", "remove", "--scope", "user", MCP_NAME]).catch(() => {});
+  try {
+    await run("claude", claudeAddArgs(launch));
+    return null;
+  } catch (err) {
+    const e = err as { stderr?: string; message?: string };
+    return (e.stderr || e.message || String(err)).trim();
+  }
+}
+
 /** Text for AppleScript's string literal. */
 export function appleScriptString(s: string): string {
   return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;

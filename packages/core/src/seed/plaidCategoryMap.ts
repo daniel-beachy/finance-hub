@@ -3,9 +3,21 @@
  *
  * Keys are Plaid `detailed` values, plus one row per `primary` value used as
  * the fallback when a detailed value is not listed (Plaid adds new ones).
- * The detailed list follows Plaid's v1 taxonomy and was written from the
- * published category names; check it against Plaid's taxonomy CSV when the
- * categorizer is built (M4).
+ * Checked in M4 against Plaid's published taxonomy, which lists both
+ * versions: https://plaid.com/documents/pfc-taxonomy-all.csv. PFCv2 (from
+ * December 2025) is a superset of v1 with three renames (INCOME_WAGES to
+ * INCOME_SALARY, INCOME_OTHER_INCOME to INCOME_OTHER, and
+ * TRANSFER_IN_CASH_ADVANCES_AND_LOANS to LOAN_DISBURSEMENTS_*). Both
+ * spellings are kept, since a connection can be on either version.
+ *
+ * Left out on purpose, so they wait in Review: money moved through apps
+ * (TRANSFER_*_FROM_APPS: Venmo, Cash App, PayPal could be anything), wires
+ * and crypto (large, and maybe to someone else: never hide one as an
+ * internal transfer), withdrawals (cash spending or a move to another bank),
+ * and OTHER_OTHER.
+ *
+ * Changing a value here reaches existing databases only through a migration
+ * (seeding never overwrites a row); see 0004_plaid_category_map.
  */
 export const PLAID_CATEGORY_MAP: Record<string, string> = {
   // Primary fallbacks
@@ -21,10 +33,11 @@ export const PLAID_CATEGORY_MAP: Record<string, string> = {
   MEDICAL: "health.medical",
   PERSONAL_CARE: "personal.care",
   GENERAL_SERVICES: "financial.services",
-  GOVERNMENT_AND_NON_PROFIT: "financial.taxes",
+  GOVERNMENT_AND_NON_PROFIT: "financial.fees",
   TRANSPORTATION: "transport.transit",
   TRAVEL: "travel.activities",
   RENT_AND_UTILITIES: "utilities.energy",
+  LOAN_DISBURSEMENTS: "transfers.loan-principal",
 
   INCOME_DIVIDENDS: "income.dividends",
   INCOME_INTEREST_EARNED: "income.interest",
@@ -33,8 +46,26 @@ export const PLAID_CATEGORY_MAP: Record<string, string> = {
   INCOME_UNEMPLOYMENT: "income.other",
   INCOME_WAGES: "income.paycheck",
   INCOME_OTHER_INCOME: "income.other",
+  // PFCv2
+  INCOME_SALARY: "income.paycheck",
+  INCOME_OTHER: "income.other",
+  INCOME_CONTRACTOR: "income.other",
+  INCOME_GIG_ECONOMY: "income.other",
+  INCOME_RENTAL: "income.other",
+  INCOME_MILITARY: "income.other",
+  INCOME_LONG_TERM_DISABILITY: "income.other",
+  INCOME_CHILD_SUPPORT: "income.other",
 
-  TRANSFER_IN_CASH_ADVANCES_AND_LOANS: "transfers.internal",
+  // PFCv2: borrowed money arriving is not income.
+  LOAN_DISBURSEMENTS_AUTO: "transfers.loan-principal",
+  LOAN_DISBURSEMENTS_CASH_ADVANCES: "transfers.loan-principal",
+  LOAN_DISBURSEMENTS_EWA: "transfers.loan-principal",
+  LOAN_DISBURSEMENTS_MORTGAGE: "transfers.loan-principal",
+  LOAN_DISBURSEMENTS_PERSONAL: "transfers.loan-principal",
+  LOAN_DISBURSEMENTS_STUDENT: "transfers.loan-principal",
+  LOAN_DISBURSEMENTS_OTHER_DISBURSEMENT: "transfers.loan-principal",
+
+  TRANSFER_IN_CASH_ADVANCES_AND_LOANS: "transfers.loan-principal",
   TRANSFER_IN_DEPOSIT: "income.other",
   TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS: "transfers.investment",
   TRANSFER_IN_SAVINGS: "transfers.internal",
@@ -43,7 +74,6 @@ export const PLAID_CATEGORY_MAP: Record<string, string> = {
 
   TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS: "transfers.investment",
   TRANSFER_OUT_SAVINGS: "transfers.internal",
-  TRANSFER_OUT_WITHDRAWAL: "shopping.general",
   TRANSFER_OUT_ACCOUNT_TRANSFER: "transfers.internal",
   TRANSFER_OUT_OTHER_TRANSFER_OUT: "transfers.internal",
 
@@ -53,6 +83,10 @@ export const PLAID_CATEGORY_MAP: Record<string, string> = {
   LOAN_PAYMENTS_MORTGAGE_PAYMENT: "housing.mortgage",
   LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT: "personal.education",
   LOAN_PAYMENTS_OTHER_PAYMENT: "transfers.loan-principal",
+  // PFCv2. Buy-now-pay-later payments are the purchase itself, as far as these accounts show.
+  LOAN_PAYMENTS_BNPL: "shopping.general",
+  LOAN_PAYMENTS_CASH_ADVANCES: "transfers.loan-principal",
+  LOAN_PAYMENTS_EWA: "transfers.loan-principal",
 
   BANK_FEES_ATM_FEES: "financial.fees",
   BANK_FEES_FOREIGN_TRANSACTION_FEES: "financial.fees",
@@ -60,6 +94,8 @@ export const PLAID_CATEGORY_MAP: Record<string, string> = {
   BANK_FEES_INTEREST_CHARGE: "financial.interest",
   BANK_FEES_OVERDRAFT_FEES: "financial.fees",
   BANK_FEES_OTHER_BANK_FEES: "financial.fees",
+  BANK_FEES_LATE_FEES: "financial.fees",
+  BANK_FEES_CASH_ADVANCE: "financial.fees",
 
   ENTERTAINMENT_CASINOS_AND_GAMBLING: "entertainment.events",
   ENTERTAINMENT_MUSIC_AND_AUDIO: "entertainment.streaming",

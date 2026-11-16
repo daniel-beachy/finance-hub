@@ -1,6 +1,7 @@
 import { init } from "./0001_init.ts";
 import { fileImport } from "./0002_file_import.ts";
 import { changeBatches } from "./0003_change_batches.ts";
+import { plaidCategoryMapFixes } from "./0004_plaid_category_map.ts";
 
 export interface Migration {
   id: number;
@@ -17,4 +18,5 @@ export const migrations: Migration[] = [
   { id: 1, name: "0001_init", sql: init },
   { id: 2, name: "0002_file_import", sql: fileImport },
   { id: 3, name: "0003_change_batches", sql: changeBatches },
+  { id: 4, name: "0004_plaid_category_map", sql: plaidCategoryMapFixes },
 ];

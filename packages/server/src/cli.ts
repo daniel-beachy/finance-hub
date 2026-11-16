@@ -16,7 +16,9 @@ import {
   PLAID_SLOT_LIMIT,
   type PlaidEnv,
   plaidClientFor,
+  getSetting,
   processInbox,
+  reviewCounts,
   SECRET_CLIENT_ID,
   secretNameForEnv,
   setSetting,
@@ -29,13 +31,20 @@ import {
 import initSqlJs from "sql.js";
 import { type BackupResult, runBackup } from "./backup.ts";
 import { type AppContext, openContext } from "./context.ts";
+import { runMcpServer } from "./mcp.ts";
 import { replayToFile, restoreDatabase } from "./recovery.ts";
 import {
+  CLAUDE_DESKTOP_CONFIG,
+  claudeAddArgs,
   defaultPlistOptions,
+  desktopConfigBlock,
   installSchedule,
+  MCP_NAME,
+  mcpLaunch,
   notify,
   PLIST,
   plistFor,
+  registerWithClaudeCode,
   SYNC_HOUR,
   SYNC_MINUTE,
   uninstallSchedule,
@@ -52,13 +61,18 @@ const HELP = `fh: Finance Hub
                                 the inbox and runs the backup
   fh import                     Import files waiting in the inbox
   fh categorize                 Re-run the categorizer over everything not set by hand
+  fh review backfill --since YYYY-MM-DD
+                                Also queue large and first-time charges from that date
+                                (normally only charges after each account's first sync)
   fh backup                     Back up the database now (local copy and iCloud Drive)
   fh restore <file> [--yes]     Replace the database with a backup; keeps the old one
   fh replay [--out FILE]        Rebuild Plaid data from the raw archive into a new file
                                 and compare it with the live database
-  fh install [--print]          Run "fh sync" every day at 06:30 (launchd)
+  fh install [--print]          Run "fh sync" every day at 06:30 (launchd), register the
+                                MCP server with Claude Code, and print Claude desktop's config
   fh uninstall                  Stop the daily sync
   fh serve [--port N]           Start the local dashboard and API
+  fh mcp                        Run the MCP server for Claude over stdio
   fh sandbox-link [ins_id]      Create a Plaid Sandbox connection (no real bank)
   fh sandbox-break <id>         Force a Sandbox connection to need sign-in again (for testing)
   fh demo-db [--out FILE] [--seed N] [--as-of YYYY-MM-DD]
@@ -95,6 +109,10 @@ export async function main(argv: string[]): Promise<number> {
       return uninstallCommand();
     case "serve":
       return serveCommand(Number(flags.named.port) || DEFAULT_PORT);
+    case "mcp":
+      return runMcpServer();
+    case "review":
+      return reviewCommand(flags.positional[0], flags.named.since);
     case "sandbox-link":
       return sandboxLink(flags.positional[0] ?? "ins_109508");
     case "sandbox-break":
@@ -427,8 +445,12 @@ async function installCommand(printOnly: boolean): Promise<number> {
   const ctx = await openContext();
   const options = defaultPlistOptions(join(ctx.paths.logs, "sync.log"));
   ctx.close();
+  const launch = mcpLaunch(options);
+  const desktop = `\nFor Claude desktop, add this to ${CLAUDE_DESKTOP_CONFIG}\n(merge it into "mcpServers" if the file already has one), then restart Claude:\n\n${desktopConfigBlock(launch)}\n`;
   if (printOnly) {
     console.log(plistFor(options));
+    console.log(`Claude Code registration:\n  claude ${claudeAddArgs(launch).map(shellWord).join(" ")}`);
+    console.log(desktop);
     return 0;
   }
   await installSchedule(options);
@@ -437,8 +459,43 @@ async function installCommand(printOnly: boolean): Promise<number> {
   console.log(`"fh sync" now runs every day at ${time}, or when the Mac wakes if it was asleep then.`);
   console.log(`Log: ${options.log}`);
   console.log('The job runs through /bin/bash, which needs Full Disk Access for the iCloud backup copy.');
+
+  const failed = await registerWithClaudeCode(launch);
+  if (failed) {
+    console.log(`\nCouldn't register the MCP server with Claude Code (${failed}). Run this yourself:`);
+    console.log(`  claude ${claudeAddArgs(launch).map(shellWord).join(" ")}`);
+  } else {
+    console.log(`\nRegistered the "${MCP_NAME}" MCP server with Claude Code (user scope). Check it with: claude mcp list`);
+  }
+  console.log(desktop);
   await notify("The daily sync is installed. Notifications like this one tell you when something needs you.");
   return 0;
+}
+
+/** Quote a word for a shell command line only when it needs it. */
+function shellWord(s: string): string {
+  return /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/** `fh review backfill --since <date>`: judge older transactions for size and novelty too. */
+async function reviewCommand(sub: string | undefined, since: string | undefined): Promise<number> {
+  if (sub !== "backfill" || !since || !/^\d{4}-\d{2}-\d{2}$/.test(since)) {
+    console.error("Usage: fh review backfill --since YYYY-MM-DD");
+    return 2;
+  }
+  const ctx = await openContext();
+  try {
+    const before = await reviewCounts(ctx.deps.db);
+    const previous = await getSetting<string | null>(ctx.deps.db, "review_since", null);
+    await setSetting(ctx.deps.db, "review_since", since);
+    await settle(ctx.deps);
+    const after = await reviewCounts(ctx.deps.db);
+    console.log(`Review now judges size and new merchants from ${since}${previous ? ` (was ${previous})` : " (was each account's first sync)"}.`);
+    console.log(`Waiting in Review: ${before.all} before, ${after.all} now (large ${after.large}, unfamiliar ${after.unfamiliar}, uncategorized ${after.uncategorized}, flagged ${after.flagged}).`);
+    return 0;
+  } finally {
+    ctx.close();
+  }
 }
 
 async function uninstallCommand(): Promise<number> {
