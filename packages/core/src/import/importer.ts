@@ -1,7 +1,8 @@
+import { settleQuietly } from "../categorize/settle.ts";
 import { first } from "../db/driver.ts";
 import { DEFAULT_OWNER_ID, getSetting, setSetting } from "../db/seed.ts";
 import { type CoreDeps, localDate } from "../deps.ts";
-import { InvalidInput, NotFound } from "../mutations.ts";
+import { InvalidInput, NotFound } from "../errors.ts";
 import { taxTreatment } from "../sync/sync.ts";
 import { fidelityActivityParser, fidelityPositionsParser, netBenefitsParser } from "./fidelity.ts";
 import { ofxParser } from "./ofx.ts";
@@ -199,6 +200,7 @@ export async function importFile(deps: CoreDeps, file: InboxFile): Promise<Impor
       [nowIso, ...resolved.map((r) => r.account.id)],
     );
     await dismissImportAlerts(deps, file.name);
+    if (added > 0) await settleQuietly(deps);
     return { file: file.name, status: "imported", parser: parsed.parser, rows_total: total, rows_added: added, rows_skipped: skipped, accounts };
   });
 }

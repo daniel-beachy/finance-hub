@@ -1,5 +1,6 @@
 import { init } from "./0001_init.ts";
 import { fileImport } from "./0002_file_import.ts";
+import { changeBatches } from "./0003_change_batches.ts";
 
 export interface Migration {
   id: number;
@@ -15,4 +16,5 @@ export interface Migration {
 export const migrations: Migration[] = [
   { id: 1, name: "0001_init", sql: init },
   { id: 2, name: "0002_file_import", sql: fileImport },
+  { id: 3, name: "0003_change_batches", sql: changeBatches },
 ];

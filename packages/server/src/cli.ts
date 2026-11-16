@@ -20,6 +20,7 @@ import {
   SECRET_CLIENT_ID,
   secretNameForEnv,
   setSetting,
+  settle,
   slotsUsed,
   syncAll,
   syncConnection,
@@ -50,6 +51,7 @@ const HELP = `fh: Finance Hub
   fh sync [connection-id]       Sync all connections (or one); a full sync also imports
                                 the inbox and runs the backup
   fh import                     Import files waiting in the inbox
+  fh categorize                 Re-run the categorizer over everything not set by hand
   fh backup                     Back up the database now (local copy and iCloud Drive)
   fh restore <file> [--yes]     Replace the database with a backup; keeps the old one
   fh replay [--out FILE]        Rebuild Plaid data from the raw archive into a new file
@@ -79,6 +81,8 @@ export async function main(argv: string[]): Promise<number> {
       return sync(flags.positional[0], flags.named.trigger);
     case "import":
       return importCommand();
+    case "categorize":
+      return categorizeCommand();
     case "backup":
       return backupCommand();
     case "restore":
@@ -314,6 +318,25 @@ async function backupAndReport(ctx: AppContext): Promise<BackupResult> {
     console.log(`The iCloud copy failed: ${result.icloudError}`);
   }
   return result;
+}
+
+async function categorizeCommand(): Promise<number> {
+  const ctx = await openContext();
+  try {
+    const r = await settle(ctx.deps);
+    console.log(
+      `${r.changed} transactions changed, ${r.pairs_made} transfer pairs made, ${r.pairs_dissolved} dropped, ` +
+        `${r.merchants_created} new merchants. ${r.queued} waiting in Review.`,
+    );
+    const rows = await ctx.deps.db.all<{ source: string; n: number }>(
+      `SELECT COALESCE(category_source, 'uncategorized') AS source, COUNT(*) AS n FROM transactions
+       WHERE removed_at IS NULL AND is_split_parent = 0 GROUP BY 1 ORDER BY n DESC`,
+    );
+    console.log(rows.map((x) => `${x.source} ${x.n}`).join(", "));
+    return 0;
+  } finally {
+    ctx.close();
+  }
 }
 
 async function backupCommand(): Promise<number> {

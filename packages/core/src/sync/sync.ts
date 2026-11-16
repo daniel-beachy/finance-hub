@@ -13,6 +13,7 @@ import {
 } from "../plaid/client.ts";
 import { type PlaidEnv, SECRET_CLIENT_ID, secretNameForEnv, tokenNameForConnection } from "../secrets.ts";
 import { addDays, toCents, toCentsOrNull } from "../util/money.ts";
+import { settleQuietly } from "../categorize/settle.ts";
 import { DEFAULT_OWNER_ID } from "../db/seed.ts";
 
 export type SyncTrigger = "schedule" | "manual" | "mcp";
@@ -86,12 +87,16 @@ export async function syncConnection(
   };
   if (conn.status === "removed") return { ...result, status: "skipped" };
 
-  return runSync(deps, conn, result, trigger, async () => {
+  const synced = await runSync(deps, conn, result, trigger, async () => {
     const client = await plaidClientFor(deps, conn.plaid_env!);
     const token = await deps.secrets.get(tokenNameForConnection(connectionId));
     if (!token) throw new Error("The access token for this connection is missing from the secret store");
     return liveSource(deps, connectionId, client, token);
   });
+  // New and changed rows get merchants, transfer pairs, categories and review
+  // reasons. A replay skips this: it compares raw Plaid data only.
+  if (synced.status === "ok") await settleQuietly(deps);
+  return synced;
 }
 
 /** Sync a connection from recorded answers instead of the API. Used by replay. */
@@ -437,7 +442,8 @@ async function upsertTransaction(
     await db.run(
       `UPDATE transactions SET pending = ?, pending_external_id = ?, posted_date = ?, authorized_date = ?,
          amount_cents = ?, currency = ?, description_raw = ?, merchant_raw = ?, plaid_pfc_primary = ?,
-         plaid_pfc_detailed = ?, plaid_pfc_confidence = ?, mcc = ?, updated_at = ?, removed_at = NULL
+         plaid_pfc_detailed = ?, plaid_pfc_confidence = ?, mcc = ?, updated_at = ?, removed_at = NULL,
+         merchant_id = NULL
        WHERE id = ?`,
       [...shared, nowIso, existing.id],
     );

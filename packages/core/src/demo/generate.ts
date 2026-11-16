@@ -1,6 +1,8 @@
 import type { SqlDriver } from "../db/driver.ts";
 import { DEFAULT_OWNER_ID, setSetting } from "../db/seed.ts";
-import { refreshReviewQueue } from "../review.ts";
+import { normalizeMerchant } from "../categorize/normalize.ts";
+import type { RuleMatch } from "../categorize/rules.ts";
+import { settle } from "../categorize/settle.ts";
 import { UNCATEGORIZED } from "../seed/categories.ts";
 import { createIdFactory } from "../util/ids.ts";
 import { addDays } from "../util/money.ts";
@@ -72,6 +74,8 @@ const CONNECTIONS: Record<DemoAccount["connection"], string> = {
   meridian: "Meridian Financial",
   northstar: "Northstar Investments",
 };
+
+const PAIRED_CATEGORIES = new Set(["transfers.internal", "transfers.card-payment"]);
 
 interface Tx {
   account: AccountKey;
@@ -178,14 +182,15 @@ export async function generateDemoData(db: SqlDriver, options: DemoOptions = {})
       );
     }
 
+    // Transactions go in bare, the way a bank sends them. The categorizer
+    // below does the rest, exactly as it does for real data.
     let n = 0;
     for (const t of txs) {
       n++;
-      const review = t.needsReview || t.category === UNCATEGORIZED;
       await db.run(
         `INSERT INTO transactions (id, account_id, source, external_id, pending, posted_date, amount_cents,
-           description_raw, merchant_raw, category_id, category_source, needs_review, created_at, updated_at)
-         VALUES (?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           description_raw, merchant_raw, created_at, updated_at)
+         VALUES (?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           newId(),
           accountIds.get(t.account)!,
@@ -195,13 +200,30 @@ export async function generateDemoData(db: SqlDriver, options: DemoOptions = {})
           t.cents,
           t.description,
           t.merchant,
-          t.category,
-          review ? null : "memory",
-          review ? 1 : 0,
           stamp,
           stamp,
         ],
       );
+    }
+
+    // Merchant memory, as if the owner had categorized each merchant once.
+    // Transfers and card payments are left out: the matcher has to find those.
+    const byKey = new Map<string, { name: string; categories: Set<string> }>();
+    for (const t of txs) {
+      const { key, name } = normalizeMerchant(t.merchant, t.description);
+      const entry = byKey.get(key) ?? { name, categories: new Set<string>() };
+      entry.categories.add(t.category);
+      byKey.set(key, entry);
+    }
+    for (const [key, { name, categories }] of byKey) {
+      const only = categories.size === 1 ? [...categories][0]! : null;
+      const remembered = only && only !== UNCATEGORIZED && !PAIRED_CATEGORIES.has(only) ? only : null;
+      await db.run("INSERT INTO merchants (id, name, normalized_key, default_category_id) VALUES (?, ?, ?, ?)", [
+        newId(),
+        name,
+        key,
+        remembered,
+      ]);
     }
 
     for (const [key, date, cents] of buildBalances(rng, txs, start, asOf)) {
@@ -214,8 +236,25 @@ export async function generateDemoData(db: SqlDriver, options: DemoOptions = {})
 
   // The demo's clock is pinned to its last day of data, so "this month"
   // always has something in it however old the build is.
+  // Rules for what merchant memory can't settle: one employer paying both
+  // salary and bonus, and a store that sells everything.
+  const rules: [number, RuleMatch, string][] = [
+    [50, { description_contains: "PAYROLL", direction: "in" }, "income.paycheck"],
+    [50, { description_contains: "BONUS", direction: "in" }, "income.bonus"],
+    [200, { merchant_key: "RIVERMART" }, "shopping.general"],
+  ];
+  for (const [priority, match, category] of rules) {
+    await db.run(
+      `INSERT INTO rules (id, priority, enabled, match, actions, origin, created_at)
+       VALUES (?, ?, 1, ?, ?, 'user', ?)`,
+      [newId(), priority, JSON.stringify(match), JSON.stringify({ category_id: category }), stamp],
+    );
+  }
+
   await setSetting(db, "demo_as_of", asOf);
-  await refreshReviewQueue(db, addDays(asOf, -45));
+  // Size and familiarity are judged over the last 45 days of the data.
+  await setSetting(db, "review_since", addDays(asOf, -45));
+  await settle({ db, now: () => new Date(stamp), newId });
 
   return { accounts: ACCOUNTS.length, transactions: txs.length, from: start, to: asOf };
 }

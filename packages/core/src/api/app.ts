@@ -20,7 +20,8 @@ import {
   processInbox,
   uploadFiles,
 } from "../import/importer.ts";
-import { categorizeTransactions, InvalidInput, NotFound, type TransactionPatch, updateTransaction } from "../mutations.ts";
+import { InvalidInput, NotFound } from "../errors.ts";
+import { categorizeTransactions, type TransactionPatch, updateTransaction } from "../mutations.ts";
 import { PlaidError } from "../plaid/client.ts";
 import {
   listAccounts,
@@ -188,7 +189,8 @@ export function createApp(deps: CoreDeps, options: AppOptions = {}) {
     if (ids.length === 0 || typeof body.category_id !== "string") {
       return c.json({ error: "ids and category_id are required" }, 400);
     }
-    return c.json({ updated: await categorizeTransactions(deps, ids, body.category_id) });
+    const result = await categorizeTransactions(deps, ids, body.category_id);
+    return c.json({ updated: result.updated, batch_id: result.batch_id });
   });
 
   app.get("/api/overview", async (c) => c.json(await overview(deps.db, today())));

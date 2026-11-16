@@ -1,5 +1,8 @@
 export * from "./api/app.ts";
 export * from "./archive.ts";
+export * from "./categorize/normalize.ts";
+export * from "./categorize/rules.ts";
+export * from "./categorize/settle.ts";
 export * from "./connections.ts";
 export * from "./db/driver.ts";
 export * from "./db/migrate.ts";
@@ -7,6 +10,7 @@ export * from "./db/seed.ts";
 export * from "./db/wasm.ts";
 export * from "./demo/generate.ts";
 export * from "./deps.ts";
+export * from "./errors.ts";
 export * from "./import/csv.ts";
 export * from "./import/fidelity.ts";
 export * from "./import/importer.ts";

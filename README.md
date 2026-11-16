@@ -6,7 +6,7 @@ The code is public. The data is not: nothing financial ever lives in this repo.
 
 **Demo:** <https://daniel-beachy.github.io/finance-hub/> runs the real dashboard in your browser on made-up data. Edits you make there last until you reload.
 
-**Status:** the foundation (M0), Plaid in Sandbox (M1), file import (M3) and the dashboard (M5) are built: Home, Transactions, Review, Spending, Net worth and Accounts. M2's tooling is built: backups, restore, replay of the raw archive, and the daily sync. Linking real accounts is next, then rules and the Claude connection (M4). The full plan is in [docs/PLAN.md](docs/PLAN.md).
+**Status:** the foundation (M0), Plaid in Sandbox (M1), file import (M3) and the dashboard (M5) are built: Home, Transactions, Review, Spending, Net worth and Accounts. Real accounts are linked (M2): backups, restore, replay of the raw archive and the daily sync are running. The categorizer (the core of M4) is built: merchants, transfer matching, rules, merchant memory and undo. Next are the Rules page and the Claude connection. The full plan is in [docs/PLAN.md](docs/PLAN.md).
 
 ## What you need
 
@@ -45,6 +45,7 @@ Then open http://127.0.0.1:5202.
 | `npm run fh -- status` | Connections, slots used, recent syncs |
 | `npm run fh -- sync` | Pull new data for every connection, import the inbox, then back up |
 | `npm run fh -- import` | Import files waiting in the inbox |
+| `npm run fh -- categorize` | Re-run the categorizer over everything not set by hand |
 | `npm run fh -- backup` | Back up the database now, locally and to iCloud Drive |
 | `npm run fh -- restore <file>` | Replace the database with a backup (asks first; keeps the old one) |
 | `npm run fh -- replay` | Rebuild everything Plaid sent from the raw archive into a new file, and compare it with the live database |

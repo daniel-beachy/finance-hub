@@ -714,6 +714,35 @@ Decided after the M2 gate (2026-11-15), before M4:
 - **M4 adds a weekly automatic categorizing run**, replacing "Deferred: automatic categorizing" in section 6 and the LLM-categorizing row in section 2. It's a local scheduled task, weekly (Sunday, after that morning's sync), on Sonnet. It runs the same flow as "clear my review queue": `review_queue`, then `categorize_transactions` with `category_source = claude` for what it's confident about. Anything it isn't sure of stays in Review with a note saying why. It creates a rule only where section 6 already allows it (an unambiguous merchant). Build it last in M4, after the tools pass their acceptance checks, and record each run's counts (categorized, left in Review) so the numbers the deferral wanted still get collected.
 - **Plaid connections are counted per institution login (an Item), not per account.** Dan's dashboard shows a 20-connection Trial; Plaid's docs say 10. `PLAID_SLOT_LIMIT` stays 10 until Dan says otherwise.
 
+Added while building M4's core (the categorizer; Fable, 2026-11-15):
+
+- **`settle(deps)` is the whole categorizer** (`packages/core/src/categorize/settle.ts`). It looks at every transaction not set by hand and writes only what differs: merchants, transfer pairs, categories, rule hit counts, review reasons. It runs after every successful sync, every import that added rows, every edit and every undo. It is idempotent, so "when in doubt, settle". `fh categorize` runs it by hand.
+- **Nothing `settle` writes is logged to `changes`.** Only what a person or Claude did is logged (`packages/core/src/mutations.ts`): transaction edits, rule edits, merchant defaults, transfer marks. Everything else is worked out again. This is why undo is simple: restore the logged rows, settle.
+- **Migration 0003 adds `changes.batch_id`.** One action is one batch. `undo(deps, id)` takes a change id or a batch id, reverses newest first, and skips (and reports) any row whose intent fields changed since. Every edit function returns `{ batch_id, change_ids }`.
+- **Transfer pairs need both sides to look like a transfer** (stricter than section 6): Plaid primary `TRANSFER_IN`, `TRANSFER_OUT` or `LOAN_PAYMENTS`, or for rows with no Plaid category, transfer words in the description. Without this a $20 dinner pairs with a $20 Venmo. Pending rows and hand-categorized rows are never paired. A missed pair is fixed with `markTransfer`.
+- **Lone card payments:** Plaid's `LOAN_PAYMENTS_CREDIT_CARD_PAYMENT`, or money arriving on a credit account whose description says payment and not reward, refund or statement credit. Capital One gives only 90 days, so most card-side payments have no other side.
+- **Plaid's primary category alone never files a `TRANSFER_*` row.** A detailed match in `plaid_category_map` is required, so Venmo doesn't become an internal transfer.
+- **Merchant memory** is set when a hand categorization leaves every hand-categorized transaction of that merchant agreeing; two different categories clear it. Generic payees (`isGenericMerchant`: Venmo, PayPal, checks, ATM, "POS PURCHASE", Amazon) never get one. `remember: false` skips it for one edit.
+- **Rules support the `category_id` action only.** `merchant_id`, `add_tags` and `exclude` wait until something needs them. Amount bounds compare the size of the amount; `direction` handles the sign. Lower `priority` runs first (default 100), newest first within one. `hit_count` is the number of live transactions the rule currently decides.
+- **Rule edits take `dryRun`** and return `changed` plus a sample of ten either way.
+- **`unmarkTransfer` locks both sides as Uncategorized by hand**, so the matcher doesn't pair them straight back; they wait in Review.
+- **Review's "since" date** is the `review_since` setting if present (the demo pins it), else the day each account was added.
+- **The demo generator inserts bare transactions and lets `settle` categorize them**, with merchant defaults as memory and three rules (payroll, bonus, the everything-store). So the demo exercises the real pipeline.
+- **Real data, first run (4 institutions, 381 transactions):** 201 by Plaid, 63 transfers (15 pairs), 117 queued. Most of the queue is Plaid `MEDIUM` confidence on a few repeat merchants, which one hand categorization each clears.
+
+**Left in M4, for Opus.** Each item calls functions that already exist and are tested (`packages/core/test/categorize.test.ts`); keep routes and tools thin.
+
+1. **API routes** in `packages/core/src/api/app.ts`: `GET /api/rules`, `POST /api/rules` (`dry_run` in the body), `PATCH /api/rules/:id`, `DELETE /api/rules/:id`, `POST /api/transfers/mark`, `POST /api/transfers/unmark`, `POST /api/undo`. The categorize route gains `create_rule` and `remember`.
+2. **Rules page** (`/rules`) and "make this a rule" on a transaction: show the dry-run count before saving. An "Undo" action after any edit, using the returned `batch_id`. Show a paired transfer's other side on the transaction.
+3. **`fh mcp`**: a stdio MCP server named `finance-hub` with the section 7 tools that don't need M6 to M8. Read tools open the database read-only. Write tools pass `actor: "claude"` and return `batch_id` and `change_ids`. `categorize_transactions` takes `create_rule` and `remember`; its description says to turn `remember` off, and make no rule, for merchants that vary. `create_rule` and `update_rule` descriptions say to dry-run first when more than 20 transactions would change. `run_sql` accepts a single `SELECT` only (read-only connection, 500 rows, 5 seconds). `split_transaction` and tags in `annotate_transaction` still need core functions: follow the batch-and-settle pattern in `mutations.ts`.
+4. **`review_queue` tool:** group by merchant, and include each merchant's key, Plaid's category and confidence, and a few past categorized charges, so Claude can decide without more calls.
+5. **Prompts:** `weekly-review`, `clear-review-queue`, `month-close`.
+6. **`fh install`** also registers the server (`claude mcp add --scope user`) and prints the Claude desktop config block.
+7. **`fh review backfill --since <date>`:** set `review_since`, settle.
+8. **`plaid_category_map`:** Dan's data uses Plaid's newer names (`INCOME_SALARY`, `INCOME_CONTRACTOR`, `TRANSFER_IN_TRANSFER_IN_FROM_APPS`, `TRANSFER_OUT_TRANSFER_OUT_FROM_APPS`), which the seed map lacks. Check the whole map against Plaid's published taxonomy CSV and ship the fixes as a migration. Leave the `FROM_APPS` rows unmapped on purpose.
+9. **The weekly Sonnet run** (see the note above), built last.
+10. **Acceptance:** the M4 list in section 10. The synthetic-data checks are already a test.
+
 ## When the plan is wrong
 
 - If a fact in section 2 has changed, or an acceptance criterion can't be met as written, stop and tell Dan what changed and what you'd do instead. Don't quietly pick a different approach.

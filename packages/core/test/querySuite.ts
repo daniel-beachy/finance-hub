@@ -162,7 +162,7 @@ export function defineQuerySuite(name: string, open: () => Promise<SqlDriver>) {
       expect(changes[0]!.n).toBe(3);
       await expect(updateTransaction(deps, target.id, { category_id: "nope.nope" })).rejects.toThrow(/No category/);
       await expect(updateTransaction(deps, "missing", { note: "x" })).rejects.toThrow(/No transaction/);
-      expect(await categorizeTransactions(deps, [target.id], "food.groceries")).toBe(1);
+      expect((await categorizeTransactions(deps, [target.id], "food.groceries")).updated).toBe(1);
     });
 
     it("rolls back a failed transaction", async () => {
