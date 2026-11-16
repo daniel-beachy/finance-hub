@@ -300,3 +300,103 @@ export async function reviewQueue(db: SqlDriver, opts: ReviewQueueOptions = {}) 
 }
 
 const sumAbs = (rows: QueueRow[]) => rows.reduce((n, r) => n + Math.abs(r.amount_cents), 0);
+
+// ---------------------------------------------------------------------------
+// Automatic review runs
+
+export interface ReviewRun {
+  id: string;
+  started_at: string;
+  finished_at: string;
+  trigger: "schedule" | "manual";
+  queue_before: number | null;
+  queue_after: number;
+  categorized: number;
+  reviewed: number;
+  flagged: number;
+  rules_created: number;
+  batch_ids: string[];
+  summary: string | null;
+}
+
+/**
+ * Close out a categorizing run by Claude. The counts come from the `changes`
+ * log (everything Claude did since `startedAt` and hasn't been undone), not
+ * from Claude's own tally, so they can be trusted for the eight-week numbers.
+ */
+export async function recordReviewRun(
+  deps: { db: SqlDriver; now: () => Date; newId: () => string },
+  input: { startedAt: string; trigger?: "schedule" | "manual"; queueBefore?: number | null; summary?: string | null },
+): Promise<ReviewRun> {
+  const { db } = deps;
+  if (Number.isNaN(Date.parse(input.startedAt))) throw new InvalidInput("started_at must be an ISO timestamp");
+  // Same shape as `changes.at`, so the text comparison below is a time comparison.
+  const startedAt = new Date(input.startedAt).toISOString();
+  const finished = deps.now().toISOString();
+  if (startedAt > finished) throw new InvalidInput("started_at is in the future");
+  const rows = await db.all<{ entity: string; entity_id: string; before: string | null; after: string | null; batch_id: string | null }>(
+    `SELECT entity, entity_id, before, after, batch_id FROM changes
+     WHERE actor = 'claude' AND at >= ? AND undone_at IS NULL ORDER BY rowid`,
+    [startedAt],
+  );
+  const categorized = new Set<string>();
+  const reviewed = new Set<string>();
+  const flagged = new Set<string>();
+  let rulesCreated = 0;
+  const batches = new Set<string>();
+  for (const r of rows) {
+    if (r.batch_id) batches.add(r.batch_id);
+    const before = r.before ? JSON.parse(r.before) : null;
+    const after = r.after ? JSON.parse(r.after) : null;
+    if (r.entity === "rule" && before === null && after) rulesCreated++;
+    if (r.entity !== "transaction" || !before || !after) continue;
+    if (after.category_id !== before.category_id && after.category_id !== UNCATEGORIZED) categorized.add(r.entity_id);
+    if (after.reviewed_at && !before.reviewed_at) reviewed.add(r.entity_id);
+    if ((after.flag === "suspicious" || after.flag === "disputed") && before.flag !== after.flag) flagged.add(r.entity_id);
+  }
+  const queue = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM transactions t WHERE t.removed_at IS NULL AND t.is_split_parent = 0 AND ${IN_REVIEW_SQL}`,
+  );
+  const summary = input.summary?.trim().slice(0, 4000) || null;
+  const run: ReviewRun = {
+    id: deps.newId(),
+    started_at: startedAt,
+    finished_at: finished,
+    trigger: input.trigger ?? "schedule",
+    queue_before: input.queueBefore ?? null,
+    queue_after: queue[0]?.n ?? 0,
+    categorized: categorized.size,
+    reviewed: reviewed.size,
+    flagged: flagged.size,
+    rules_created: rulesCreated,
+    batch_ids: [...batches],
+    summary,
+  };
+  await db.run(
+    `INSERT INTO review_runs (id, started_at, finished_at, trigger, queue_before, queue_after, categorized, reviewed, flagged,
+       rules_created, batch_ids, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      run.id,
+      run.started_at,
+      run.finished_at,
+      run.trigger,
+      run.queue_before,
+      run.queue_after,
+      run.categorized,
+      run.reviewed,
+      run.flagged,
+      run.rules_created,
+      JSON.stringify(run.batch_ids),
+      run.summary,
+    ],
+  );
+  return run;
+}
+
+export async function listReviewRuns(db: SqlDriver, limit = 20): Promise<ReviewRun[]> {
+  const rows = await db.all<Omit<ReviewRun, "batch_ids"> & { batch_ids: string }>(
+    "SELECT * FROM review_runs ORDER BY started_at DESC LIMIT ?",
+    [Math.min(Math.max(limit, 1), 200)],
+  );
+  return rows.map((r) => ({ ...r, batch_ids: JSON.parse(r.batch_ids) as string[] }));
+}

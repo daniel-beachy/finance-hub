@@ -39,7 +39,7 @@ const PROMPTS: Prompt[] = [
    - Anything you can't tell: leave it, and list it for me with why.
    - Anything that looks wrong (a duplicate, a charge I wouldn't recognize): review_transactions with flag suspicious and a note.
 3. Before any rule that would change more than 20 existing transactions, dry-run it and tell me the count.
-4. When done, call review_queue again and report: how many you categorized, rules created, what's left and why, and the batch_ids I can undo.`,
+4. When done, call review_queue again and record_review_run (trigger manual, started_at from before your first change, queue_before from step 1). Report: how many you categorized, rules created, what's left and why, and the batch_ids I can undo.`,
   },
   {
     name: "weekly-review",

@@ -17,6 +17,7 @@ import {
   type PlaidEnv,
   plaidClientFor,
   getSetting,
+  listReviewRuns,
   processInbox,
   reviewCounts,
   SECRET_CLIENT_ID,
@@ -64,6 +65,7 @@ const HELP = `fh: Finance Hub
   fh review backfill --since YYYY-MM-DD
                                 Also queue large and first-time charges from that date
                                 (normally only charges after each account's first sync)
+  fh review runs                What the weekly categorizing runs did
   fh backup                     Back up the database now (local copy and iCloud Drive)
   fh restore <file> [--yes]     Replace the database with a backup; keeps the old one
   fh replay [--out FILE]        Rebuild Plaid data from the raw archive into a new file
@@ -479,8 +481,25 @@ function shellWord(s: string): string {
 
 /** `fh review backfill --since <date>`: judge older transactions for size and novelty too. */
 async function reviewCommand(sub: string | undefined, since: string | undefined): Promise<number> {
+  if (sub === "runs") {
+    const ctx = await openContext();
+    try {
+      const runs = await listReviewRuns(ctx.deps.db, 20);
+      if (runs.length === 0) console.log("No categorizing runs recorded yet.");
+      for (const r of runs) {
+        console.log(
+          `${r.started_at.slice(0, 16).replace("T", " ")}  ${r.trigger}  queue ${r.queue_before ?? "?"} -> ${r.queue_after}  ` +
+            `categorized ${r.categorized}, reviewed ${r.reviewed}, flagged ${r.flagged}, rules ${r.rules_created}`,
+        );
+        if (r.summary) console.log(`    ${r.summary.replace(/\s+/g, " ").slice(0, 300)}`);
+      }
+      return 0;
+    } finally {
+      ctx.close();
+    }
+  }
   if (sub !== "backfill" || !since || !/^\d{4}-\d{2}-\d{2}$/.test(since)) {
-    console.error("Usage: fh review backfill --since YYYY-MM-DD");
+    console.error("Usage: fh review backfill --since YYYY-MM-DD\n       fh review runs");
     return 2;
   }
   const ctx = await openContext();

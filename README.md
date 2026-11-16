@@ -6,7 +6,7 @@ The code is public. The data is not: nothing financial ever lives in this repo.
 
 **Demo:** <https://daniel-beachy.github.io/finance-hub/> runs the real dashboard in your browser on made-up data. Edits you make there last until you reload.
 
-**Status:** the foundation (M0), Plaid in Sandbox (M1), file import (M3) and the dashboard (M5) are built: Home, Transactions, Review, Spending, Net worth and Accounts. Real accounts are linked (M2): backups, restore, replay of the raw archive and the daily sync are running. The categorizer (the core of M4) is built: merchants, transfer matching, rules, merchant memory and undo. Next are the Rules page and the Claude connection. The full plan is in [docs/PLAN.md](docs/PLAN.md).
+**Status:** the foundation (M0), Plaid in Sandbox (M1), real accounts with backups and the daily sync (M2), file import (M3), categorizing and the Claude connection (M4) and the dashboard (M5) are built. The dashboard has Home, Transactions, Review, Spending, Net worth, Accounts and Rules pages; every edit can be undone. Claude reads and edits the ledger through a local MCP server, and a weekly Sonnet run clears what it confidently can from Review. Next are budgets, recurring charges and alerts (M6). The full plan is in [docs/PLAN.md](docs/PLAN.md).
 
 ## What you need
 
@@ -46,10 +46,13 @@ Then open http://127.0.0.1:5202.
 | `npm run fh -- sync` | Pull new data for every connection, import the inbox, then back up |
 | `npm run fh -- import` | Import files waiting in the inbox |
 | `npm run fh -- categorize` | Re-run the categorizer over everything not set by hand |
+| `npm run fh -- review backfill --since <date>` | Also queue large and first-time charges from that date (normally only those after each account's first sync) |
+| `npm run fh -- review runs` | What the weekly categorizing runs did |
+| `npm run fh -- mcp` | The MCP server for Claude, over stdio (Claude starts it; you don't run it by hand) |
 | `npm run fh -- backup` | Back up the database now, locally and to iCloud Drive |
 | `npm run fh -- restore <file>` | Replace the database with a backup (asks first; keeps the old one) |
 | `npm run fh -- replay` | Rebuild everything Plaid sent from the raw archive into a new file, and compare it with the live database |
-| `npm run fh -- install` | Run `fh sync` every day at 06:30 (a launchd job); `uninstall` turns it off |
+| `npm run fh -- install` | Run `fh sync` every day at 06:30 (a launchd job), register the MCP server with Claude Code and print Claude desktop's config; `uninstall` turns the sync off |
 | `npm run fh -- serve` | Start the dashboard and API on port 5202 |
 | `npm run fh -- env sandbox` | Choose Sandbox or Production for new links |
 | `npm run fh -- sandbox-link` | Create a test connection to Plaid's fake bank |
@@ -83,6 +86,18 @@ Every Plaid response, and every Plaid error, is saved to the `raw/` folder befor
 
 The job runs through `/bin/bash`, so for the iCloud copy `/bin/bash` needs Full Disk Access (System Settings › Privacy & Security › Full Disk Access).
 
+## Categorizing
+
+Each new transaction goes through, in order: a category you or Claude set by hand (never changed by anything automatic), transfer matching between your own accounts, your rules, the merchant's remembered category, Plaid's category when Plaid is confident, and otherwise Review. On the Transactions page, open a transaction and choose **Make this a rule**: it shows how many existing transactions the rule would change before you save. The **Rules** page lists, edits, turns off and deletes rules. After any edit an **Undo** button appears for a few seconds.
+
+**Real-data baseline:** 117 transactions waited in Review after the first full categorizing pass (2026-11-15, four institutions, 381 transactions), before any clearing. The number after the first clear with Claude goes here once it's done.
+
+## Claude (MCP)
+
+`npm run fh -- install` registers a local MCP server named `finance-hub` with Claude Code (`claude mcp add --scope user`) and prints the block to paste into Claude desktop's config. Claude then has tools to read the ledger (overview, transactions, spending summaries, cash flow, net worth, holdings, the review queue, rules, sync status, and a read-only `run_sql`) and to change it (categorize, rules with a dry run, split, notes and tags, mark reviewed, pair transfers, sync, undo). Read tools use a read-only database connection; `run_sql` accepts one `SELECT`, returns at most 500 rows and is stopped after 5 seconds. Everything Claude changes is logged with a `batch_id` that `undo` reverses. Three prompts are included: `clear-review-queue`, `weekly-review` and `month-close`. Linking or removing connections, reading secrets and deleting transactions are not exposed.
+
+A Claude desktop scheduled task, **Finance Hub: weekly categorizing run**, runs on Sunday at 07:30 on Sonnet. It categorizes only what it's confident of, makes rules only for unambiguous merchants, leaves the rest in Review with a note, and records its counts (`fh review runs`). It runs while the Claude app is open.
+
 ## Limits to know about
 
 - **Plaid's Trial plan allows 10 real connections for life.** Removing one does not give the slot back. The app asks before using a slot and never removes a connection at Plaid.
@@ -103,5 +118,4 @@ The first time a file's account can't be matched by its last four digits, the Ac
 
 - The Fidelity parsers against real downloads. They follow Fidelity's published export columns; the NetBenefits columns are a best guess until a real file is checked.
 
-- Anything against real institutions. Linking them is the rest of M2.
-- Plaid's OAuth popup (used by Chase, Capital One and Citi). The Sandbox test used First Platypus Bank's plain login.
+- Asking questions through Claude Code and Claude desktop on real data (the tools are tested, but not yet by Dan through Claude).

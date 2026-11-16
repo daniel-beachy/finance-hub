@@ -286,6 +286,28 @@ describe("write tools", () => {
     await expect(tool("mark_transfer", { ids: [out.id] })).rejects.toThrow();
   });
 
+  it("records a categorizing run from the change log, ignoring what was undone", async () => {
+    const startedAt = deps.now().toISOString();
+    const q = await tool("review_queue");
+    const pizza = (await tool("query_transactions", { merchant: "blue door", limit: 2 })).transactions.map((t: any) => t.id);
+    await tool("categorize_transactions", { ids: pizza, category_id: "food.groceries", create_rule: true });
+    const large = (await tool("review_queue", { reason: "large" })).merchants[0].transactions[0].id;
+    await tool("review_transactions", { ids: [large], note: "known", flag: "suspicious" });
+    const oops = await tool("annotate_transaction", { id: large, note: "changed my mind" });
+    await tool("undo", { id: oops.batch_id });
+    const run = await tool("record_review_run", { started_at: startedAt, queue_before: q.total_transactions, summary: "Two pizza charges filed." });
+    expect(run.categorized).toBe(2);
+    expect(run.reviewed).toBe(1);
+    expect(run.flagged).toBe(1);
+    expect(run.rules_created).toBe(1);
+    expect(run.batch_ids).toHaveLength(2);
+    expect(run.queue_before).toBe(q.total_transactions);
+    expect(run.trigger).toBe("schedule");
+    const stored = await deps.db.all<{ categorized: number }>("SELECT categorized FROM review_runs");
+    expect(stored).toEqual([{ categorized: 2 }]);
+    await expect(tool("record_review_run", { started_at: "yesterday-ish" })).rejects.toThrow(/ISO/);
+  });
+
   it("says plainly when syncing isn't available", async () => {
     await expect(tool("sync_now")).rejects.toThrow(/isn't available/);
   });

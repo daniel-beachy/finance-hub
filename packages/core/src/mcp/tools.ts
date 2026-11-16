@@ -19,7 +19,7 @@ import {
   updateRule,
 } from "../mutations.ts";
 import { listAccounts, listCategories, listConnections, listTransactions, type ReviewTab } from "../queries.ts";
-import { holdingsReport, reviewQueue, type SummaryGroup, type SummaryKind, spendingSummary, syncStatus } from "./reports.ts";
+import { holdingsReport, recordReviewRun, reviewQueue, type SummaryGroup, type SummaryKind, spendingSummary, syncStatus } from "./reports.ts";
 import { checkSelect, SQL_ROW_LIMIT } from "./sql.ts";
 
 /** What the tools run against. */
@@ -510,6 +510,28 @@ const WRITE: ToolDef[] = [
       if (!ctx.syncNow) throw new InvalidInput("Syncing isn't available here");
       return ctx.syncNow();
     },
+  },
+  {
+    name: "record_review_run",
+    description:
+      "At the end of a categorizing run (the weekly automatic run, or a clear-review-queue session), record it. Give started_at (the ISO time you began, taken from your first tool call's moment or earlier), queue_before (total_transactions from your first review_queue call) and a short summary of what you left in Review and why. The counts of what you categorized, reviewed, flagged and the rules you made are worked out from the change log.",
+    inputSchema: object(
+      {
+        started_at: S.text("ISO timestamp from before your first change, e.g. 2026-11-15T07:30:00Z"),
+        queue_before: S.int("Transactions waiting in Review when you started"),
+        trigger: { type: "string", enum: ["schedule", "manual"], description: "schedule for the weekly run (default), manual otherwise" },
+        summary: S.text("What you did and what you left, in a few sentences"),
+      },
+      ["started_at"],
+    ),
+    readOnly: false,
+    run: async (ctx, a) =>
+      recordReviewRun(ctx.deps, {
+        startedAt: str(a, "started_at", true)!,
+        queueBefore: int(a, "queue_before"),
+        trigger: str(a, "trigger") === "manual" ? "manual" : "schedule",
+        summary: str(a, "summary"),
+      }),
   },
   {
     name: "undo",
