@@ -709,6 +709,11 @@ Added while building M2's tooling (before any real institution was linked):
 - **Notifications** cover sign-in needed, a failed sync, files waiting in the inbox, a failed iCloud copy, and Plaid consent ending within 14 days. Plaid's `PENDING_DISCONNECT` arrives only by webhook, which a local app can't receive, so the consent date stands in for it.
 - **`fh restore` moves each database with its `-wal` and `-shm` files**, so a stale write-ahead log can never be paired with a different database. It refuses to run while something listens on port 5202, and without `--yes` it needs a terminal to confirm.
 
+Decided after the M2 gate (2026-11-15), before M4:
+
+- **M4 adds a weekly automatic categorizing run**, replacing "Deferred: automatic categorizing" in section 6 and the LLM-categorizing row in section 2. It's a local scheduled task, weekly (Sunday, after that morning's sync), on Sonnet. It runs the same flow as "clear my review queue": `review_queue`, then `categorize_transactions` with `category_source = claude` for what it's confident about. Anything it isn't sure of stays in Review with a note saying why. It creates a rule only where section 6 already allows it (an unambiguous merchant). Build it last in M4, after the tools pass their acceptance checks, and record each run's counts (categorized, left in Review) so the numbers the deferral wanted still get collected.
+- **Plaid connections are counted per institution login (an Item), not per account.** Dan's dashboard shows a 20-connection Trial; Plaid's docs say 10. `PLAID_SLOT_LIMIT` stays 10 until Dan says otherwise.
+
 ## When the plan is wrong
 
 - If a fact in section 2 has changed, or an acceptance criterion can't be met as written, stop and tell Dan what changed and what you'd do instead. Don't quietly pick a different approach.
