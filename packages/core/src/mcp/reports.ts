@@ -3,7 +3,7 @@ import { listRules } from "../categorize/rules.ts";
 import { PLAID_SLOT_LIMIT } from "../connections.ts";
 import type { SqlDriver } from "../db/driver.ts";
 import { InvalidInput } from "../errors.ts";
-import { IN_REVIEW_SQL, LABEL_SQL, listConnections, listSyncRuns } from "../queries.ts";
+import { COUNTED_SQL, IN_REVIEW_SQL, LABEL_SQL, listConnections, listSyncRuns } from "../queries.ts";
 import { UNCATEGORIZED } from "../seed/categories.ts";
 
 /**
@@ -12,7 +12,7 @@ import { UNCATEGORIZED } from "../seed/categories.ts";
  * originals are left out; spending is the net of expense-kind categories.
  */
 
-const COUNTED = "t.removed_at IS NULL AND t.is_split_parent = 0 AND t.excluded = 0 AND t.pending = 0";
+const COUNTED = COUNTED_SQL;
 
 export type SummaryGroup = "category" | "group" | "merchant" | "month";
 export type SummaryKind = "expense" | "income" | "all";

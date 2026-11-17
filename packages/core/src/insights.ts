@@ -1,15 +1,16 @@
 import type { SqlDriver } from "./db/driver.ts";
-import { IN_REVIEW_SQL, LABEL_SQL, listTransactions, netWorth, type TransactionView } from "./queries.ts";
+import { COUNTED_SQL, IN_REVIEW_SQL, LABEL_SQL, listTransactions, netWorth, type TransactionView } from "./queries.ts";
 import { addDays } from "./util/money.ts";
 
 /**
  * Read models for the dashboard. Conventions: "spending" is the net of every
  * expense-kind category shown as a positive number (refunds reduce it);
  * "income" is the net of income-kind categories. Transfers, investment
- * moves, pending rows and excluded rows are left out of both.
+ * moves, pending rows and excluded rows are left out of both, and so is
+ * uncategorized money coming in (see `COUNTED_SQL`).
  */
 
-const COUNTED = "t.removed_at IS NULL AND t.is_split_parent = 0 AND t.excluded = 0 AND t.pending = 0";
+const COUNTED = COUNTED_SQL;
 
 export function monthOf(date: string): string {
   return date.slice(0, 7);

@@ -112,6 +112,17 @@ export interface TransactionFilter {
   direction?: "in" | "out";
 }
 
+/**
+ * Which transactions count toward spending and income: not removed, not a
+ * split original, not excluded, not pending. Money that arrives with no
+ * category yet (a paycheck Plaid wasn't sure about, a Venmo payment) is left
+ * out too, until it's filed: uncategorized is an expense category, and a
+ * deposit must never show up as negative spending.
+ */
+export const COUNTED_SQL =
+  "t.removed_at IS NULL AND t.is_split_parent = 0 AND t.excluded = 0 AND t.pending = 0" +
+  " AND NOT (t.category_id = 'uncategorized.uncategorized' AND t.amount_cents > 0)";
+
 /** What a transaction is called on screen: the merchant if known, else the description. */
 export const LABEL_SQL = "COALESCE(t.merchant_raw, t.description_raw)";
 
@@ -264,7 +275,7 @@ export async function spendingByCategory(
   return db.all(
     `SELECT c.id AS category_id, c.name, c.kind, SUM(t.amount_cents) AS total_cents, COUNT(*) AS count
      FROM transactions t JOIN categories c ON c.id = t.category_id
-     WHERE t.removed_at IS NULL AND t.is_split_parent = 0 AND t.excluded = 0 AND t.pending = 0
+     WHERE ${COUNTED_SQL}
        AND c.kind != 'transfer' AND t.posted_date BETWEEN ? AND ?
      GROUP BY c.id ORDER BY total_cents ASC, c.id`,
     [from, to],

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  cashFlowByMonth,
   categorizeTransactions,
   type CoreDeps,
   createIdFactory,
@@ -324,6 +325,19 @@ describe("undo", () => {
     await undo(deps, batch);
     expect(await get(a)).toMatchObject({ note: null, excluded: 0 });
     await expect(undo(deps, "nope")).rejects.toThrow(/No change or batch/);
+  });
+});
+
+describe("money in with no category yet", () => {
+  it("is left out of spending and income until it's filed, and never makes spending negative", async () => {
+    const pay = await tx({ account: "chk", cents: 400_000, description: "ACME CORP DIR DEP", primary: "INCOME", detailed: "INCOME_SALARY", confidence: "LOW" });
+    await tx({ account: "chk", cents: -3000, description: "SQ *CORNER STAND", confidence: "LOW" }); // uncategorized money out still counts
+    await fuel(-4000);
+    await settle(deps);
+    const month = async () => (await cashFlowByMonth(db, "2026-11", "2026-11"))[0]!;
+    expect(await month()).toMatchObject({ spending_cents: 7000, income_cents: 0 });
+    await updateTransaction(deps, pay, { category_id: "income.paycheck" });
+    expect(await month()).toMatchObject({ spending_cents: 7000, income_cents: 400_000 });
   });
 });
 
