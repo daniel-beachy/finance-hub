@@ -1,0 +1,162 @@
+{
+  "year": 2026,
+  "lookedUp": "2026-11-16",
+  "note": "Every group carries the official source its numbers were read from. Dollar amounts are whole dollars, rates are fractions. Nothing here was written from memory. See \"unverified\" at the bottom for what could not be confirmed.",
+
+  "ordinaryBrackets": {
+    "source": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+    "cite": "Rev. Proc. 2025-32, section 4.01, Tables 1 to 4",
+    "note": "Each row is the rate and the taxable income where it starts.",
+    "mfj": [
+      { "rate": 0.1, "from": 0 },
+      { "rate": 0.12, "from": 24800 },
+      { "rate": 0.22, "from": 100800 },
+      { "rate": 0.24, "from": 211400 },
+      { "rate": 0.32, "from": 403550 },
+      { "rate": 0.35, "from": 512450 },
+      { "rate": 0.37, "from": 768700 }
+    ],
+    "hoh": [
+      { "rate": 0.1, "from": 0 },
+      { "rate": 0.12, "from": 17700 },
+      { "rate": 0.22, "from": 67450 },
+      { "rate": 0.24, "from": 105700 },
+      { "rate": 0.32, "from": 201750 },
+      { "rate": 0.35, "from": 256200 },
+      { "rate": 0.37, "from": 640600 }
+    ],
+    "single": [
+      { "rate": 0.1, "from": 0 },
+      { "rate": 0.12, "from": 12400 },
+      { "rate": 0.22, "from": 50400 },
+      { "rate": 0.24, "from": 105700 },
+      { "rate": 0.32, "from": 201775 },
+      { "rate": 0.35, "from": 256225 },
+      { "rate": 0.37, "from": 640600 }
+    ],
+    "mfs": [
+      { "rate": 0.1, "from": 0 },
+      { "rate": 0.12, "from": 12400 },
+      { "rate": 0.22, "from": 50400 },
+      { "rate": 0.24, "from": 105700 },
+      { "rate": 0.32, "from": 201775 },
+      { "rate": 0.35, "from": 256225 },
+      { "rate": 0.37, "from": 384350 }
+    ]
+  },
+
+  "capitalGains": {
+    "source": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+    "cite": "Rev. Proc. 2025-32, section 4.03 (maximum zero rate and maximum 15 percent rate amounts); rates 0, 15 and 20 percent are in IRC 1(h)",
+    "rates": [0, 0.15, 0.2],
+    "maxZeroRate": { "mfj": 98900, "mfs": 49450, "hoh": 66200, "single": 49450 },
+    "max15Rate": { "mfj": 613700, "mfs": 306850, "hoh": 579600, "single": 545500 }
+  },
+
+  "capitalLossLimit": {
+    "source": "https://www.irs.gov/taxtopics/tc409",
+    "cite": "IRS Topic 409; IRC 1211(b). Not indexed for inflation.",
+    "mfj": 3000,
+    "single": 3000,
+    "hoh": 3000,
+    "mfs": 1500
+  },
+
+  "standardDeduction": {
+    "source": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+    "cite": "Rev. Proc. 2025-32, section 4.14(1)",
+    "mfj": 32200,
+    "hoh": 24150,
+    "single": 16100,
+    "mfs": 16100
+  },
+
+  "nonItemizerCharity": {
+    "source": "https://www.govinfo.gov/content/pkg/PLAW-119publ21/html/PLAW-119publ21.htm",
+    "cite": "Pub. L. 119-21, section 70424, amending IRC 170(p): cash gifts deductible without itemizing, for tax years after 2025",
+    "mfj": 2000,
+    "single": 1000,
+    "hoh": 1000,
+    "mfs": 1000
+  },
+
+  "saltCap": {
+    "source": "https://www.govinfo.gov/content/pkg/PLAW-119publ21/html/PLAW-119publ21.htm",
+    "cite": "Pub. L. 119-21, section 70120, adding IRC 164(b)(7): 2026 limit, reduced by 30 percent of modified AGI over the threshold, never below the floor; all three are halved for married filing separately",
+    "cap": 40400,
+    "phaseDownThreshold": 505000,
+    "phaseDownRate": 0.3,
+    "floor": 10000
+  },
+
+  "charityFloor": {
+    "source": "https://www.govinfo.gov/content/pkg/PLAW-119publ21/html/PLAW-119publ21.htm",
+    "cite": "Pub. L. 119-21, section 70425, adding IRC 170(b)(1)(I): itemized gifts count only above this share of AGI, for tax years after 2025",
+    "rateOfAgi": 0.005
+  },
+
+  "itemizedLimit": {
+    "source": "https://www.govinfo.gov/content/pkg/PLAW-119publ21/html/PLAW-119publ21.htm",
+    "cite": "Pub. L. 119-21, section 70111, rewriting IRC 68: itemized deductions are cut by 2/37 of the lesser of the deductions or the income above the start of the 37 percent bracket, for tax years after 2025",
+    "numerator": 2,
+    "denominator": 37
+  },
+
+  "niit": {
+    "source": "https://www.irs.gov/taxtopics/tc559",
+    "cite": "IRS Topic 559; IRC 1411. Thresholds are not indexed for inflation.",
+    "rate": 0.038,
+    "threshold": { "mfj": 250000, "mfs": 125000, "single": 200000, "hoh": 200000 }
+  },
+
+  "socialSecurity": {
+    "source": "https://www.irs.gov/publications/p15",
+    "cite": "IRS Publication 15 (2026), \"Social security and Medicare tax for 2026\": employee rate and wage base",
+    "rate": 0.062,
+    "wageBase": 184500
+  },
+
+  "medicare": {
+    "source": "https://www.irs.gov/publications/p15",
+    "cite": "IRS Publication 15 (2026): employee rate, no wage limit",
+    "rate": 0.0145
+  },
+
+  "additionalMedicare": {
+    "source": "https://www.irs.gov/taxtopics/tc560",
+    "cite": "IRS Topic 560 (thresholds by filing status, and the 200,000 per-employee point where employers start withholding); the 0.9 percent rate is stated in https://www.irs.gov/businesses/small-businesses-self-employed/questions-and-answers-for-the-additional-medicare-tax",
+    "rate": 0.009,
+    "threshold": { "mfj": 250000, "mfs": 125000, "single": 200000, "hoh": 200000 },
+    "employerWithholdingThreshold": 200000
+  },
+
+  "supplementalWithholding": {
+    "source": "https://www.irs.gov/publications/p15",
+    "cite": "IRS Publication 15 (2026), section 7: optional flat rate on supplemental wages, and the mandatory rate on supplemental wages over 1 million in a calendar year",
+    "rate": 0.22,
+    "overMillionRate": 0.37,
+    "millionThreshold": 1000000
+  },
+
+  "retirementPlans": {
+    "source": "https://www.irs.gov/pub/irs-drop/n-25-67.pdf",
+    "cite": "IRS Notice 2025-67: 402(g)(1) elective deferral limit, 414(v)(2)(B)(i) catch-up at 50 and over, 414(v)(2)(E)(i) catch-up at 60 to 63, 415(c)(1)(A) limit on all additions to a defined contribution plan",
+    "electiveDeferral": 24500,
+    "catchUp50": 8000,
+    "catchUp60to63": 11250,
+    "annualAdditions": 72000
+  },
+
+  "hsa": {
+    "source": "https://www.irs.gov/pub/irs-drop/rp-25-19.pdf",
+    "cite": "Rev. Proc. 2025-19, section 2.01(1)",
+    "selfOnly": 4400,
+    "family": 8750
+  },
+
+  "unverified": [
+    "The Social Security wage base was read from IRS Publication 15 (2026). The Social Security Administration's own page (https://www.ssa.gov/oact/cola/cbb.html) refused automated requests, so it was not read directly.",
+    "The 2026 Form 1040 instructions (Tax Table, Tax Computation Worksheet, Qualified Dividends and Capital Gain Tax Worksheet) were not published when this file was written. The engine follows the 2025 worksheets line by line with the 2026 amounts above.",
+    "The HSA catch-up for age 55 and over is not in this file and not modeled."
+  ]
+}

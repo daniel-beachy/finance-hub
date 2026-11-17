@@ -32,3 +32,8 @@ export * from "./mcp/reports.ts";
 export * from "./mcp/server.ts";
 export * from "./mcp/sql.ts";
 export * from "./mcp/tools.ts";
+export * from "./projections/notice.ts";
+export * from "./tax/espp.ts";
+export * from "./tax/federal.ts";
+export * from "./tax/params.ts";
+export * from "./tax/state.ts";
