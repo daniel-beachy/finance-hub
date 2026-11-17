@@ -1,5 +1,8 @@
 import type {
   AccountView,
+  AlertView,
+  BudgetLine,
+  BudgetStatus,
   CashFlowMonth,
   CategoryView,
   ConnectionView,
@@ -8,6 +11,7 @@ import type {
   MerchantHistory,
   NetWorthPoint,
   Overview,
+  RecurringView,
   ReviewCounts,
   Rule,
   RuleEditResult,
@@ -17,10 +21,15 @@ import type {
   TransactionView,
   UndoResult,
   UnmatchedAccount,
+  UpcomingCharge,
+  WeeklyDigest,
 } from "@finance-hub/core";
 
 export type {
   AccountView,
+  AlertView,
+  BudgetLine,
+  BudgetStatus,
   CashFlowMonth,
   CategoryView,
   ConnectionView,
@@ -29,6 +38,7 @@ export type {
   MerchantHistory,
   NetWorthPoint,
   Overview,
+  RecurringView,
   ReviewCounts,
   Rule,
   RuleEditResult,
@@ -38,7 +48,15 @@ export type {
   TransactionView,
   UndoResult,
   UnmatchedAccount,
+  UpcomingCharge,
+  WeeklyDigest,
 };
+
+export interface RecurringData {
+  today: string;
+  series: RecurringView[];
+  upcoming: UpcomingCharge[];
+}
 
 export type RuleView = Rule & { category_name: string | null };
 

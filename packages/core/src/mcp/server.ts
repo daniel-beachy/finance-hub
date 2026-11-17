@@ -8,7 +8,7 @@ import { type McpContext, TOOLS } from "./tools.ts";
  */
 
 export const SERVER_NAME = "finance-hub";
-export const SERVER_VERSION = "0.4.0";
+export const SERVER_VERSION = "0.5.0";
 const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS = `Finance Hub is the user's own ledger: bank, card and investment accounts synced from Plaid and file imports into a local database.
@@ -46,11 +46,11 @@ const PROMPTS: Prompt[] = [
     description: "A short review of the last seven days, then clear the queue.",
     text: () => `Give me my weekly Finance Hub review.
 
-1. Call overview for net worth, this month's pace and connection health. Mention any connection that needs me to sign in.
-2. Call spending_summary for the last 7 days grouped by group, and for the 8 weeks before that, and compare this week to the weekly average.
-3. Call query_transactions for the last 7 days with min_amount_cents 10000 to list the largest charges.
+1. Call weekly_digest. It has the week's spending by group against the 8-week average, the largest charges, new merchants, open alerts, budget pace, the Review queue and charges due in the next two weeks. Narrate it; don't recompute it.
+2. Call overview and mention any connection that needs me to sign in.
+3. Go through the open alerts. Explain each in a line. Dismiss (dismiss_alert) only the ones the data explains, such as a price increase I'd expect; leave possible duplicates, large charges and missed charges for me, and say what to check.
 4. Call review_queue and clear what you confidently can, as in the clear-review-queue prompt; ask me about the rest.
-5. Report in a few short paragraphs: what stood out, how spending compares, what you changed (with batch_ids), and what needs me.`,
+5. Report in a few short paragraphs: what stood out, how spending compares and how the budget is pacing, what's coming up, what you changed (with batch_ids), and what needs me.`,
   },
   {
     name: "month-close",

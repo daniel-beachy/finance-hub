@@ -17,14 +17,15 @@ import {
   transferKind,
 } from "./categorize/settle.ts";
 import { first, type SqlDriver, type SqlValue } from "./db/driver.ts";
-import type { CoreDeps } from "./deps.ts";
+import { type CoreDeps, localDate } from "./deps.ts";
 import { InvalidInput, NotFound } from "./errors.ts";
 import { getTransaction, type TransactionView } from "./queries.ts";
 import { UNCATEGORIZED } from "./seed/categories.ts";
 
 /**
  * Everything a person or Claude can change: transactions, rules, transfer
- * pairs. The dashboard's routes and the MCP tools both call these.
+ * pairs, budgets, recurring series and alerts. The dashboard's routes and
+ * the MCP tools both call these.
  *
  * Each action writes `changes` rows that share a `batch_id`, holding what the
  * touched rows looked like before and after. `undo` reverses a whole batch.
@@ -731,6 +732,168 @@ export async function splitTransaction(
 }
 
 // ---------------------------------------------------------------------------
+// Budgets, recurring series and alerts (M6)
+
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+interface BudgetSnapshot {
+  id: string;
+  category_id: string;
+  month: string | null;
+  amount_cents: number;
+  rollover: number;
+  since_month: string | null;
+}
+
+async function budgetRow(db: SqlDriver, categoryId: string, month: string | null): Promise<BudgetSnapshot | undefined> {
+  return first<BudgetSnapshot>(
+    db,
+    `SELECT id, category_id, month, amount_cents, rollover, since_month FROM budgets
+     WHERE category_id = ? AND ${month === null ? "month IS NULL" : "month = ?"}`,
+    month === null ? [categoryId] : [categoryId, month],
+  );
+}
+
+async function writeBudget(db: SqlDriver, row: BudgetSnapshot | null, categoryId: string, month: string | null): Promise<void> {
+  await db.run(`DELETE FROM budgets WHERE category_id = ? AND ${month === null ? "month IS NULL" : "month = ?"}`, month === null ? [categoryId] : [categoryId, month]);
+  if (row) {
+    await db.run("INSERT INTO budgets (id, category_id, month, amount_cents, rollover, since_month) VALUES (?, ?, ?, ?, ?, ?)", [
+      row.id,
+      row.category_id,
+      row.month,
+      row.amount_cents,
+      row.rollover,
+      row.since_month,
+    ]);
+  }
+}
+
+export interface BudgetInput {
+  category_id: string;
+  /** `YYYY-MM` for one month, or null for the default that applies to every month without its own amount. */
+  month: string | null;
+  /** Whole cents, zero or more. Null removes the budget. */
+  amount_cents: number | null;
+  /** Carry what's left (or overspent) into the next month. Left out, it stays as it was (off for a new budget). */
+  rollover?: boolean;
+}
+
+/** Set, change or remove one category's budget for a month or as the default. */
+export async function setBudget(
+  deps: Deps,
+  input: BudgetInput,
+  options: { actor?: Actor; tool?: string } = {},
+): Promise<EditResult & { budget: BudgetSnapshot | null }> {
+  const { db } = deps;
+  const category = await first<{ kind: string }>(db, "SELECT kind FROM categories WHERE id = ?", [input.category_id]);
+  if (!category) throw new InvalidInput(`Unknown category: ${input.category_id}`);
+  if (category.kind !== "expense") throw new InvalidInput("Budgets are for spending categories only");
+  if (input.month !== null && !MONTH.test(input.month)) throw new InvalidInput("month must look like 2026-11, or be null for the default");
+  if (input.amount_cents !== null && (!Number.isInteger(input.amount_cents) || input.amount_cents < 0)) {
+    throw new InvalidInput("amount_cents must be a whole number of cents, zero or more");
+  }
+  const thisMonth = localDate(deps.now()).slice(0, 7);
+  return inBatch(deps, options.actor ?? "user", options.tool ?? "set_budget", async (batch) => {
+    const before = (await budgetRow(db, input.category_id, input.month)) ?? null;
+    let after: BudgetSnapshot | null = null;
+    if (input.amount_cents !== null) {
+      // Rollover counts from the month the category's budget was first set.
+      const earliest = await first<{ since: string | null }>(db, "SELECT MIN(since_month) AS since FROM budgets WHERE category_id = ?", [
+        input.category_id,
+      ]);
+      const sinceNew = input.month ?? thisMonth;
+      after = {
+        id: before?.id ?? deps.newId(),
+        category_id: input.category_id,
+        month: input.month,
+        amount_cents: input.amount_cents,
+        rollover: input.rollover === undefined ? (before?.rollover ?? 0) : input.rollover ? 1 : 0,
+        since_month: before?.since_month ?? (earliest?.since && earliest.since < sinceNew ? earliest.since : sinceNew),
+      };
+    }
+    if (JSON.stringify(before) === JSON.stringify(after)) return { ...done(batch), budget: after };
+    await writeBudget(db, after, input.category_id, input.month);
+    await log(deps, batch, "budget", `${input.category_id}|${input.month ?? "default"}`, before, after);
+    return { ...done(batch), budget: after };
+  });
+}
+
+interface SeriesSnapshot {
+  status: string;
+  status_set_by: string | null;
+  is_subscription: number;
+  subscription_set_by: string | null;
+}
+
+async function seriesSnapshot(db: SqlDriver, id: string): Promise<SeriesSnapshot | undefined> {
+  return first<SeriesSnapshot>(db, "SELECT status, status_set_by, is_subscription, subscription_set_by FROM recurring_series WHERE id = ?", [id]);
+}
+
+export interface RecurringPatch {
+  /** `ignored` hides it and stops its alerts; `ended` says it was cancelled; `active` hands the status back to detection. */
+  status?: "active" | "ended" | "ignored";
+  /** Whether it's a subscription (as opposed to a bill). */
+  is_subscription?: boolean;
+}
+
+/** Mark a recurring series ignored, ended or a subscription. What a person sets here, detection never overrides. */
+export async function updateRecurring(
+  deps: Deps,
+  id: string,
+  patch: RecurringPatch,
+  options: { actor?: Actor; tool?: string } = {},
+): Promise<EditResult> {
+  const { db } = deps;
+  if (patch.status !== undefined && !["active", "ended", "ignored"].includes(patch.status)) {
+    throw new InvalidInput("status must be active, ended or ignored");
+  }
+  const actor = options.actor ?? "user";
+  return inBatch(deps, actor, options.tool ?? "update_recurring", async (batch) => {
+    const before = await seriesSnapshot(db, id);
+    if (!before) throw new NotFound(`No recurring series with id ${id}`);
+    const after: SeriesSnapshot = { ...before };
+    if (patch.status !== undefined) {
+      after.status = patch.status;
+      after.status_set_by = patch.status === "active" ? null : actor;
+    }
+    if (patch.is_subscription !== undefined) {
+      after.is_subscription = patch.is_subscription ? 1 : 0;
+      after.subscription_set_by = actor;
+    }
+    if (JSON.stringify(before) === JSON.stringify(after)) return done(batch);
+    await db.run("UPDATE recurring_series SET status = ?, status_set_by = ?, is_subscription = ?, subscription_set_by = ? WHERE id = ?", [
+      after.status,
+      after.status_set_by,
+      after.is_subscription,
+      after.subscription_set_by,
+      id,
+    ]);
+    await log(deps, batch, "recurring", id, before, after);
+    await settle(deps);
+    return done(batch);
+  });
+}
+
+/** Dismiss alerts. A dismissed alert never comes back for the same reason. */
+export async function dismissAlerts(deps: Deps, ids: string[], options: { actor?: Actor; tool?: string } = {}): Promise<EditResult & { dismissed: number }> {
+  const { db } = deps;
+  if (ids.length === 0) throw new InvalidInput("ids must list at least one alert");
+  return inBatch(deps, options.actor ?? "user", options.tool ?? "dismiss_alert", async (batch) => {
+    const now = deps.now().toISOString();
+    let dismissed = 0;
+    for (const id of ids) {
+      const row = await first<{ dismissed_at: string | null }>(db, "SELECT dismissed_at FROM alerts WHERE id = ?", [id]);
+      if (!row) throw new NotFound(`No alert with id ${id}`);
+      if (row.dismissed_at) continue;
+      await db.run("UPDATE alerts SET dismissed_at = ? WHERE id = ?", [now, id]);
+      await log(deps, batch, "alert", id, { dismissed_at: null }, { dismissed_at: now });
+      dismissed++;
+    }
+    return { ...done(batch), dismissed };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Undo
 
 export interface UndoResult {
@@ -869,6 +1032,35 @@ async function reverseChange(deps: Deps, row: ChangeRow, now: string): Promise<s
       } else {
         await insertRule(db, before as Rule);
       }
+      return null;
+    }
+    case "budget": {
+      const [categoryId, which] = row.entity_id.split("|") as [string, string];
+      const month = which === "default" ? null : which;
+      const current = (await budgetRow(db, categoryId, month)) ?? null;
+      if (JSON.stringify(current) !== JSON.stringify(after)) return "the budget was changed again afterwards";
+      await writeBudget(db, before as BudgetSnapshot | null, categoryId, month);
+      return null;
+    }
+    case "recurring": {
+      const current = await seriesSnapshot(db, row.entity_id);
+      if (!current) return "the recurring series no longer exists";
+      if (JSON.stringify(current) !== JSON.stringify(after)) return "the series was changed again afterwards";
+      const b = before as SeriesSnapshot;
+      await db.run("UPDATE recurring_series SET status = ?, status_set_by = ?, is_subscription = ?, subscription_set_by = ? WHERE id = ?", [
+        b.status,
+        b.status_set_by,
+        b.is_subscription,
+        b.subscription_set_by,
+        row.entity_id,
+      ]);
+      return null;
+    }
+    case "alert": {
+      const current = await first<{ dismissed_at: string | null }>(db, "SELECT dismissed_at FROM alerts WHERE id = ?", [row.entity_id]);
+      if (!current) return "the alert no longer exists";
+      if (current.dismissed_at !== (after?.dismissed_at ?? null)) return "the alert was changed again afterwards";
+      await db.run("UPDATE alerts SET dismissed_at = ? WHERE id = ?", [before?.dismissed_at ?? null, row.entity_id]);
       return null;
     }
     default:

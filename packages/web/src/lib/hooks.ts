@@ -136,3 +136,39 @@ export function useDebounced<T>(value: T, ms = 200): T {
   }, [value, ms]);
   return debounced;
 }
+
+/** Set, change or remove a budget. `amount_cents` null removes it. */
+export function useBudgetEdit() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { category_id: string; month: string | null; amount_cents: number | null; rollover?: boolean; message: string }) =>
+      api<{ batch_id: string; change_ids: string[] }>("/api/budgets", {
+        category_id: input.category_id,
+        month: input.month,
+        amount_cents: input.amount_cents,
+        rollover: input.rollover,
+      }),
+    onSuccess: (res, input) => offerUndo(input.message, res.change_ids.length ? res.batch_id : null),
+    onSettled: () => client.invalidateQueries(),
+  });
+}
+
+/** Mark a recurring series ignored, ended or active again, or a subscription or a bill. */
+export function useRecurringEdit() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; status?: "active" | "ended" | "ignored"; is_subscription?: boolean; message: string }) =>
+      api<{ batch_id: string; change_ids: string[] }>(`/api/recurring/${input.id}`, { status: input.status, is_subscription: input.is_subscription }, "PATCH"),
+    onSuccess: (res, input) => offerUndo(input.message, res.change_ids.length ? res.batch_id : null),
+    onSettled: () => client.invalidateQueries(),
+  });
+}
+
+export function useDismissAlerts() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api<{ batch_id: string; change_ids: string[]; dismissed: number }>("/api/alerts/dismiss", { ids }),
+    onSuccess: (res) => offerUndo(res.dismissed === 1 ? "Alert dismissed" : `${res.dismissed} alerts dismissed`, res.change_ids.length ? res.batch_id : null),
+    onSettled: () => client.invalidateQueries(),
+  });
+}

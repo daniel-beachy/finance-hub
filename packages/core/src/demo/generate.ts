@@ -3,6 +3,7 @@ import { DEFAULT_OWNER_ID, setSetting } from "../db/seed.ts";
 import { normalizeMerchant } from "../categorize/normalize.ts";
 import type { RuleMatch } from "../categorize/rules.ts";
 import { settle } from "../categorize/settle.ts";
+import { addMonths } from "../recurring.ts";
 import { UNCATEGORIZED } from "../seed/categories.ts";
 import { createIdFactory } from "../util/ids.ts";
 import { addDays } from "../util/money.ts";
@@ -251,6 +252,32 @@ export async function generateDemoData(db: SqlDriver, options: DemoOptions = {})
     );
   }
 
+  // Budgets, set six months before asOf: monthly defaults for everyday
+  // categories, rollover on shopping, and one month's extra for a trip.
+  const budgetSince = shiftMonth(asOf.slice(0, 7), -6);
+  const budgets: [string, string | null, number, number][] = [
+    ["food.groceries", null, 95_000, 0],
+    ["food.restaurants", null, 70_000, 0],
+    ["food.coffee", null, 14_000, 0],
+    ["food.delivery", null, 8_000, 0],
+    ["shopping.general", null, 35_000, 1],
+    ["transport.fuel", null, 22_000, 0],
+    ["entertainment.streaming", null, 6_000, 0],
+    ["utilities.energy", null, 12_000, 0],
+    ["housing.rent", null, 215_000, 0],
+    ["travel.lodging", shiftMonth(asOf.slice(0, 7), 1), 90_000, 0],
+  ];
+  for (const [category, month, cents, rollover] of budgets) {
+    await db.run("INSERT INTO budgets (id, category_id, month, amount_cents, rollover, since_month) VALUES (?, ?, ?, ?, ?, ?)", [
+      newId(),
+      category,
+      month,
+      cents,
+      rollover,
+      budgetSince,
+    ]);
+  }
+
   await setSetting(db, "demo_as_of", asOf);
   // Size and familiarity are judged over the last 45 days of the data.
   await setSetting(db, "review_since", addDays(asOf, -45));
@@ -320,8 +347,8 @@ function buildTransactions(rng: Rng, start: string, asOf: string): Tx[] {
     for (const s of SUBSCRIPTIONS) {
       add({ account: s[5], date: day(s[0]), cents: -s[4], description: s[1], merchant: s[2], category: s[3] });
     }
-    // A planted price increase: Streamly goes up five months before asOf.
-    const streamly = shiftMonth(lastMonth, -5) <= month ? 1799 : 1599;
+    // A planted price increase: Streamly goes up the month before asOf.
+    const streamly = shiftMonth(lastMonth, -1) <= month ? 1799 : 1599;
     add({ account: "harborCard", date: day(5), cents: -streamly, description: "STREAMLY.COM", merchant: "Streamly", category: "entertainment.streaming" });
 
     // Transfers: both sides are generated so the matcher has pairs to find.
@@ -357,6 +384,26 @@ function buildTransactions(rng: Rng, start: string, asOf: string): Tx[] {
   // Look-alikes that are not duplicates: same merchant, same day, different amounts.
   add({ account: "harborCard", date: recent(6), cents: -475, description: "SQ *KETTLE & CROW COFFEE", merchant: "Kettle & Crow Coffee", category: "food.coffee" });
   add({ account: "harborCard", date: recent(6), cents: -1150, description: "SQ *KETTLE & CROW COFFEE", merchant: "Kettle & Crow Coffee", category: "food.coffee" });
+  // Look-alikes that are not duplicates: the same amount five days apart, and
+  // the same amount on the same day but on two different cards.
+  add({ account: "harborCard", date: recent(20), cents: -1500, description: "SALAD THEORY", merchant: "Salad Theory", category: "food.restaurants" });
+  add({ account: "harborCard", date: recent(15), cents: -1500, description: "SALAD THEORY", merchant: "Salad Theory", category: "food.restaurants" });
+  add({ account: "meridianCard", date: recent(9), cents: -4500, description: "CEDAR FUEL 4471", merchant: "Cedar Fuel", category: "transport.fuel" });
+  add({ account: "harborCard", date: recent(9), cents: -4500, description: "CEDAR FUEL 4471", merchant: "Cedar Fuel", category: "transport.fuel" });
+  // A new subscription: its third monthly charge lands inside the last 45 days.
+  for (const daysAgo of [74, 44, 14]) {
+    add({ account: "harborCard", date: recent(daysAgo), cents: -899, description: "WAVELENGTH RADIO+", merchant: "Wavelength Radio", category: "entertainment.streaming" });
+  }
+  // A look-alike that is not a subscription: the same price, but no steady gap.
+  for (const daysAgo of [70, 52, 9]) {
+    add({ account: "harborCard", date: recent(daysAgo), cents: -1200, description: "SPARKWASH CAR WASH", merchant: "Sparkwash", category: "transport.maintenance" });
+  }
+  // A missed charge: pet insurance, monthly for eight months, last paid 40 days ago.
+  for (let k = 0; k < 8; k++) {
+    add({ account: "checking", date: addMonths(recent(40), -k), cents: -2450, description: "PETPAL INSURANCE", merchant: "PetPal Insurance", category: "personal.pets" });
+  }
+  // A bank fee.
+  add({ account: "checking", date: recent(4), cents: -1200, description: "MONTHLY MAINTENANCE FEE", merchant: null, category: "financial.fees" });
   for (const [daysAgo, v] of [[1, RESTAURANTS[0]!], [0, COFFEE[0]!], [0, GROCERIES[0]!]] as const) {
     add({ account: v[5], date: recent(daysAgo), cents: -rng.int(v[3], v[4]), description: v[0], merchant: v[1], category: v[2], pending: true });
   }

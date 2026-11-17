@@ -1,12 +1,12 @@
 # Finance Hub
 
-A personal finance system that runs on your own Mac. It pulls transactions, balances and holdings from your banks through Plaid, stores them in a local SQLite database, and shows them in a local dashboard. Later milestones add budgets, a review inbox, net worth, projections and a Claude connection.
+A personal finance system that runs on your own Mac. It pulls transactions, balances and holdings from your banks through Plaid, stores them in a local SQLite database, and shows them in a local dashboard with a review inbox, budgets, recurring charges and alerts, and a Claude connection. Later milestones add investments, net worth history and projections.
 
 The code is public. The data is not: nothing financial ever lives in this repo.
 
 **Demo:** <https://daniel-beachy.github.io/finance-hub/> runs the real dashboard in your browser on made-up data. Edits you make there last until you reload.
 
-**Status:** the foundation (M0), Plaid in Sandbox (M1), real accounts with backups and the daily sync (M2), file import (M3), categorizing and the Claude connection (M4) and the dashboard (M5) are built. The dashboard has Home, Transactions, Review, Spending, Net worth, Accounts and Rules pages; every edit can be undone. Claude reads and edits the ledger through a local MCP server, and a weekly Sonnet run clears what it confidently can from Review. Next are budgets, recurring charges and alerts (M6). The full plan is in [docs/PLAN.md](docs/PLAN.md).
+**Status:** the foundation (M0), Plaid in Sandbox (M1), real accounts with backups and the daily sync (M2), file import (M3), categorizing and the Claude connection (M4), the dashboard (M5) and budgets, recurring charges and alerts (M6) are built. The dashboard has Home, Transactions, Review, Spending, Budget, Recurring, Net worth, Accounts and Rules pages; every edit can be undone. Claude reads and edits the ledger through a local MCP server, including a weekly digest to review, and a weekly Sonnet run clears what it confidently can from Review. The tax and retirement engines for M8 are built and tested but not yet on a page. Next are net worth and investments (M7). The full plan is in [docs/PLAN.md](docs/PLAN.md).
 
 ## What you need
 

@@ -1,13 +1,15 @@
 import { Link } from "react-router";
-import type { Overview } from "../api.ts";
+import type { AlertView, Overview, WeeklyDigest } from "../api.ts";
 import { BarList, ColumnChart, Sparkline } from "../components/charts.tsx";
 import { Card, Empty, ErrorNote, PageHeader } from "../components/Shell.tsx";
 import { Amount, Marks } from "../components/tx.tsx";
 import { money, monthEnd, monthLabel, percent, shortDate, txLink } from "../lib/format.ts";
-import { useGet } from "../lib/hooks.ts";
+import { useDismissAlerts, useGet } from "../lib/hooks.ts";
+import { CloseIcon } from "../components/icons.tsx";
 
 export function Home() {
   const { data, error } = useGet<Overview>("/api/overview");
+  const digest = useGet<WeeklyDigest>("/api/digest").data;
   if (error) return <ErrorNote error={error} />;
   if (!data) return null;
 
@@ -29,6 +31,8 @@ export function Home() {
           </Empty>
         </Card>
       )}
+
+      {digest && digest.alerts.length > 0 && <Alerts alerts={digest.alerts} today={today} />}
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="Net worth" action={<Link to="/net-worth" className="hover:text-ink">Details</Link>}>
@@ -75,10 +79,23 @@ export function Home() {
                 Typical month <span className="num text-ink">{money(month.typical_month_cents, { whole: true })}</span>
               </span>
             </div>
-            <p className="mt-3 border-t border-line-soft pt-2.5 text-[13px] text-muted">
-              Income this month{" "}
-              <Link to={txLink({ kind: "income", from, to: today })} className="num text-ink">
-                {money(month.income_cents, { whole: true })}
+            <p className="mt-3 flex flex-wrap justify-between gap-x-4 gap-y-1 border-t border-line-soft pt-2.5 text-[13px] text-muted">
+              <span>
+                Income this month{" "}
+                <Link to={txLink({ kind: "income", from, to: today })} className="num text-ink">
+                  {money(month.income_cents, { whole: true })}
+                </Link>
+              </span>
+              <Link to="/budget" className="hover:text-ink">
+                {digest?.budget ? (
+                  <>
+                    Budget <span className="num text-ink">{money(digest.budget.spent_cents, { whole: true })}</span> of{" "}
+                    <span className="num">{money(digest.budget.available_cents, { whole: true })}</span>
+                    {digest.budget.over.length > 0 && <span className="text-alert"> · {digest.budget.over.length} over</span>}
+                  </>
+                ) : (
+                  "Set a budget"
+                )}
               </Link>
             </p>
           </div>
@@ -129,6 +146,66 @@ export function Home() {
         </Card>
       </div>
 
+      {digest && (
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <Card title="Last 7 days" action={<span>{shortDate(digest.from, today)} to {shortDate(digest.to, today)}</span>}>
+            <div className="px-4 pt-1.5 pb-3">
+              <p className="text-[13px] text-muted">
+                <Link to={txLink({ kind: "expense", from: digest.from, to: digest.to })} className="num font-medium text-ink">
+                  {money(digest.spending_cents, { whole: true })}
+                </Link>{" "}
+                spent
+                {digest.average_weekly_cents > 0 && (
+                  <>
+                    , against a weekly average of <span className="num text-ink">{money(digest.average_weekly_cents, { whole: true })}</span> over the 8 weeks before
+                  </>
+                )}
+                .
+              </p>
+              <ul className="mt-2">
+                {digest.groups.slice(0, 5).map((g) => (
+                  <li key={g.group_id} className="flex items-baseline justify-between gap-3 py-0.5 text-[13px]">
+                    <Link to={txLink({ group_id: g.group_id, kind: "expense", from: digest.from, to: digest.to })} className="min-w-0 truncate hover:underline">
+                      {g.name}
+                    </Link>
+                    <span className="num shrink-0">
+                      {money(g.spent_cents, { whole: true })}
+                      <span className="ml-2 inline-block w-20 text-right text-xs text-faint">
+                        {g.change_cents === 0 ? "as usual" : `${money(Math.abs(g.change_cents), { whole: true })} ${g.change_cents > 0 ? "more" : "less"}`}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {digest.new_merchants.length > 0 && (
+                <p className="mt-2 border-t border-line-soft pt-2 text-xs text-muted">
+                  New this week: {digest.new_merchants.slice(0, 4).map((m) => m.merchant).join(", ")}
+                  {digest.new_merchants.length > 4 && ` and ${digest.new_merchants.length - 4} more`}
+                </p>
+              )}
+            </div>
+          </Card>
+
+          <Card title="Coming up" action={<Link to="/recurring" className="hover:text-ink">All recurring</Link>}>
+            {digest.upcoming.length === 0 ? (
+              <Empty>No recurring charges due in the next two weeks.</Empty>
+            ) : (
+              <ul className="pt-1.5 pb-1.5">
+                {digest.upcoming.slice(0, 7).map((u) => (
+                  <li key={`${u.series_id}-${u.date}`}>
+                    <Link to="/recurring" className="flex items-center gap-3 px-4 py-1.5 hover:bg-raised">
+                      <span className="num w-12 shrink-0 text-xs text-faint">{u.late ? <span className="text-alert">Late</span> : u.date === today ? "Today" : shortDate(u.date, today)}</span>
+                      <span className="min-w-0 flex-1 truncate text-[13px]">{u.label}</span>
+                      <Amount cents={u.amount_cents} className="text-[13px]" />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+      )}
+
       {data.review.all > 0 && (
         <Link to="/review" className="card mt-4 flex items-center justify-between gap-3 px-4 py-3 hover:border-faint">
           <span>
@@ -165,5 +242,51 @@ export function Home() {
         </ul>
       </Card>
     </>
+  );
+}
+
+const ALERT_LABEL: Record<AlertView["kind"], string> = {
+  duplicate: "Possible duplicate",
+  large: "Large charge",
+  new_merchant: "New merchant",
+  fee: "Fee",
+  price_increase: "Price increase",
+  new_subscription: "New subscription",
+  missed_recurring: "Missed charge",
+  connection: "Connection",
+  import: "File import",
+};
+
+/** Open alerts. Each links to what it's about and can be dismissed for good. */
+function Alerts({ alerts, today }: { alerts: AlertView[]; today: string }) {
+  const dismiss = useDismissAlerts();
+  const link = (a: AlertView) =>
+    a.series_id ? "/recurring" : a.connection_id ? "/accounts" : a.date ? txLink({ from: a.date, to: a.date }) : "/transactions";
+  return (
+    <Card title="Worth a look" action={`${alerts.length} open`} className="mb-4">
+      <ul className="pt-1 pb-1.5">
+        {alerts.slice(0, 8).map((a) => (
+          <li key={a.id} className="flex items-start gap-3 px-4 py-1.5">
+            <Link to={link(a)} className="min-w-0 flex-1 text-[13px] hover:underline">
+              <span className={`mr-2 text-xs font-medium ${a.kind === "duplicate" || a.kind === "connection" ? "text-alert" : "text-muted"}`}>
+                {ALERT_LABEL[a.kind]}
+              </span>
+              {a.message}
+              {a.date && <span className="ml-2 text-xs text-faint">{shortDate(a.date, today)}</span>}
+            </Link>
+            <button
+              type="button"
+              className="-mt-0.5 -mr-1.5 shrink-0 cursor-pointer rounded-md p-1 text-faint hover:bg-raised hover:text-ink"
+              aria-label={`Dismiss: ${a.message}`}
+              disabled={dismiss.isPending}
+              onClick={() => dismiss.mutate([a.id])}
+            >
+              <CloseIcon />
+            </button>
+          </li>
+        ))}
+      </ul>
+      {alerts.length > 8 && <p className="px-4 pb-3 text-xs text-muted">And {alerts.length - 8} more. Ask Claude for a weekly review to go through them.</p>}
+    </Card>
   );
 }

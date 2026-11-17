@@ -346,7 +346,7 @@ async function categorizeCommand(): Promise<number> {
     const r = await settle(ctx.deps);
     console.log(
       `${r.changed} transactions changed, ${r.pairs_made} transfer pairs made, ${r.pairs_dissolved} dropped, ` +
-        `${r.merchants_created} new merchants. ${r.queued} waiting in Review.`,
+        `${r.merchants_created} new merchants. ${r.queued} waiting in Review, ${r.recurring} recurring series, ${r.alerts} open alerts.`,
     );
     const rows = await ctx.deps.db.all<{ source: string; n: number }>(
       `SELECT COALESCE(category_source, 'uncategorized') AS source, COUNT(*) AS n FROM transactions

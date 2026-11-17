@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { NavLink } from "react-router";
 import { DEMO, type ReviewCounts } from "../api.ts";
 import { useGet } from "../lib/hooks.ts";
-import { BankIcon, HomeIcon, InboxIcon, ListIcon, MoonIcon, PieIcon, RuleIcon, SunIcon, TrendIcon } from "./icons.tsx";
+import { BankIcon, HomeIcon, InboxIcon, ListIcon, MoonIcon, PieIcon, RepeatIcon, RuleIcon, SunIcon, TrendIcon, WalletIcon } from "./icons.tsx";
 import { UndoToast } from "./rules.tsx";
 
 const NAV = [
@@ -10,6 +10,9 @@ const NAV = [
   { to: "/transactions", label: "Transactions", short: "Activity", icon: ListIcon },
   { to: "/review", label: "Review", short: "Review", icon: InboxIcon },
   { to: "/spending", label: "Spending", short: "Spending", icon: PieIcon },
+  // On a phone, Budget and Recurring are reached from Home and Spending.
+  { to: "/budget", label: "Budget", short: "Budget", icon: WalletIcon, rail: true },
+  { to: "/recurring", label: "Recurring", short: "Recurring", icon: RepeatIcon, rail: true },
   { to: "/net-worth", label: "Net worth", short: "Worth", icon: TrendIcon },
   { to: "/accounts", label: "Accounts", short: "Accounts", icon: BankIcon },
   // On a phone, Rules is reached from the Transactions page; the tab bar has no room.

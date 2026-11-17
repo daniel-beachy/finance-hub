@@ -95,3 +95,20 @@ export const RuleIcon = () => (
     <path d="m12.5 11.5 2 2 3.5-4" />
   </Icon>
 );
+export const WalletIcon = () => (
+  <Icon>
+    <path d="M4 6.5h11.5a.5.5 0 0 1 .5.5v8.5a.5.5 0 0 1-.5.5H4.5a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1h9v2" />
+    <path d="M13 11.25h.2" strokeWidth="2" />
+  </Icon>
+);
+export const RepeatIcon = () => (
+  <Icon>
+    <path d="M4 9V8a2.5 2.5 0 0 1 2.5-2.5h9M13 3l2.5 2.5L13 8" />
+    <path d="M16 11v1a2.5 2.5 0 0 1-2.5 2.5h-9M7 17l-2.5-2.5L7 12" />
+  </Icon>
+);
+export const CloseIcon = () => (
+  <Icon>
+    <path d="m5.5 5.5 9 9M14.5 5.5l-9 9" />
+  </Icon>
+);

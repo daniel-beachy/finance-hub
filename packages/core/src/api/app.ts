@@ -27,10 +27,14 @@ import {
   categorizeTransactions,
   createRule,
   deleteRule,
+  dismissAlerts,
   markTransfer,
+  type RecurringPatch,
+  setBudget,
   type TransactionPatch,
   undo,
   unmarkTransfer,
+  updateRecurring,
   updateRule,
   updateTransaction,
 } from "../mutations.ts";
@@ -45,6 +49,10 @@ import {
   type ReviewTab,
 } from "../queries.ts";
 import { syncAll, syncConnection } from "../sync/sync.ts";
+import { listAlerts } from "../alerts.ts";
+import { budgetStatus } from "../budgets.ts";
+import { weeklyDigest } from "../digest.ts";
+import { listRecurring, seriesCharges, upcomingCharges } from "../recurring.ts";
 
 export interface AppOptions {
   /**
@@ -309,6 +317,47 @@ export function createApp(deps: CoreDeps, options: AppOptions = {}) {
     for (const transaction of rows) items.push({ transaction, history: await merchantHistory(deps.db, transaction) });
     return c.json({ counts: await reviewCounts(deps.db), items });
   });
+
+  app.get("/api/budgets", async (c) => {
+    const month = c.req.query("month") || monthOf(today());
+    if (!/^\d{4}-\d{2}$/.test(month)) return c.json({ error: "month must look like 2026-11" }, 400);
+    return c.json(await budgetStatus(deps.db, month, today()));
+  });
+
+  app.post("/api/budgets", async (c) => {
+    const body = await readJson(c.req.raw);
+    if (typeof body.category_id !== "string") return c.json({ error: "category_id is required" }, 400);
+    const month = typeof body.month === "string" ? body.month : null;
+    const amount = typeof body.amount_cents === "number" ? body.amount_cents : null;
+    const rollover = typeof body.rollover === "boolean" ? body.rollover : undefined;
+    return c.json(await setBudget(deps, { category_id: body.category_id, month, amount_cents: amount, rollover }));
+  });
+
+  app.get("/api/recurring", async (c) => {
+    const series = await listRecurring(deps.db, today());
+    return c.json({ today: today(), series, upcoming: upcomingCharges(series, today(), 30) });
+  });
+
+  app.get("/api/recurring/:id/charges", async (c) => c.json({ charges: await seriesCharges(deps.db, c.req.param("id")) }));
+
+  app.patch("/api/recurring/:id", async (c) => {
+    const body = await readJson(c.req.raw);
+    const patch: RecurringPatch = {};
+    if (typeof body.status === "string") patch.status = body.status as RecurringPatch["status"];
+    if (typeof body.is_subscription === "boolean") patch.is_subscription = body.is_subscription;
+    return c.json(await updateRecurring(deps, c.req.param("id"), patch));
+  });
+
+  app.get("/api/alerts", async (c) => c.json({ alerts: await listAlerts(deps.db, { includeDismissed: c.req.query("all") === "1" }) }));
+
+  app.post("/api/alerts/dismiss", async (c) => {
+    const body = await readJson(c.req.raw);
+    const ids = Array.isArray(body.ids) ? body.ids.filter((x): x is string => typeof x === "string") : [];
+    if (ids.length === 0) return c.json({ error: "ids is required" }, 400);
+    return c.json(await dismissAlerts(deps, ids));
+  });
+
+  app.get("/api/digest", async (c) => c.json(await weeklyDigest(deps.db, today())));
 
   app.get("/api/imports", async (c) => c.json(await importStatus(deps)));
 

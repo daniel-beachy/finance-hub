@@ -3,6 +3,7 @@ import { fileImport } from "./0002_file_import.ts";
 import { changeBatches } from "./0003_change_batches.ts";
 import { plaidCategoryMapFixes } from "./0004_plaid_category_map.ts";
 import { reviewRuns } from "./0005_review_runs.ts";
+import { recurringAlerts } from "./0006_recurring_alerts.ts";
 
 export interface Migration {
   id: number;
@@ -21,4 +22,5 @@ export const migrations: Migration[] = [
   { id: 3, name: "0003_change_batches", sql: changeBatches },
   { id: 4, name: "0004_plaid_category_map", sql: plaidCategoryMapFixes },
   { id: 5, name: "0005_review_runs", sql: reviewRuns },
+  { id: 6, name: "0006_recurring_alerts", sql: recurringAlerts },
 ];

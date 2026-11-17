@@ -46,7 +46,7 @@ describe("MCP protocol", () => {
     expect(await rpc("ping")).toEqual({});
   });
 
-  it("lists the M4 tools and leaves out what M6 to M8 will add", async () => {
+  it("lists the M4 and M6 tools and leaves out what M8 will add", async () => {
     const { tools } = await rpc("tools/list");
     const names = tools.map((t: any) => t.name).sort();
     for (const name of [
@@ -72,10 +72,17 @@ describe("MCP protocol", () => {
       "mark_transfer",
       "sync_now",
       "undo",
+      "budget_status",
+      "recurring_list",
+      "alerts_list",
+      "weekly_digest",
+      "set_budget",
+      "update_recurring",
+      "dismiss_alert",
     ]) {
       expect(names).toContain(name);
     }
-    for (const later of ["weekly_digest", "budget_status", "run_projection", "set_budget"]) expect(names).not.toContain(later);
+    for (const later of ["run_projection", "save_scenario"]) expect(names).not.toContain(later);
     const byName = Object.fromEntries(tools.map((t: any) => [t.name, t]));
     expect(byName.run_sql.annotations.readOnlyHint).toBe(true);
     expect(byName.categorize_transactions.annotations.readOnlyHint).toBe(false);

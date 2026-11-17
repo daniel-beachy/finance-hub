@@ -5,8 +5,10 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { DEMO } from "./api.ts";
 import { Shell } from "./components/Shell.tsx";
 import { Accounts } from "./pages/Accounts.tsx";
+import { Budget } from "./pages/Budget.tsx";
 import { Home } from "./pages/Home.tsx";
 import { NetWorth } from "./pages/NetWorth.tsx";
+import { Recurring } from "./pages/Recurring.tsx";
 import { Review } from "./pages/Review.tsx";
 import { Rules } from "./pages/Rules.tsx";
 import { Spending } from "./pages/Spending.tsx";
@@ -28,6 +30,8 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/transactions" element={<Transactions />} />
             <Route path="/review" element={<Review />} />
             <Route path="/spending" element={<Spending />} />
+            <Route path="/budget" element={<Budget />} />
+            <Route path="/recurring" element={<Recurring />} />
             <Route path="/net-worth" element={<NetWorth />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/rules" element={<Rules />} />

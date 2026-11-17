@@ -9,18 +9,25 @@ import {
   cleanTags,
   createRule,
   deleteRule,
+  dismissAlerts,
   markTransfer,
   patchTransactions,
+  setBudget,
   type SplitPart,
   splitTransaction,
   type TransactionPatch,
   undo,
   unmarkTransfer,
+  updateRecurring,
   updateRule,
 } from "../mutations.ts";
 import { listAccounts, listCategories, listConnections, listTransactions, type ReviewTab } from "../queries.ts";
 import { holdingsReport, recordReviewRun, reviewQueue, type SummaryGroup, type SummaryKind, spendingSummary, syncStatus } from "./reports.ts";
 import { checkSelect, SQL_ROW_LIMIT } from "./sql.ts";
+import { listAlerts } from "../alerts.ts";
+import { budgetStatus } from "../budgets.ts";
+import { weeklyDigest } from "../digest.ts";
+import { listRecurring, seriesCharges, upcomingCharges } from "../recurring.ts";
 
 /** What the tools run against. */
 export interface McpContext {
@@ -76,7 +83,7 @@ const bool = (args: Args, key: string): boolean | undefined => {
 const ids = (args: Args, key: string): string[] => {
   const v = args[key];
   if (!Array.isArray(v) || v.length === 0 || !v.every((x) => typeof x === "string")) {
-    throw new InvalidInput(`${key} must be a non-empty list of transaction ids`);
+    throw new InvalidInput(`${key} must be a non-empty list of ids`);
   }
   return v as string[];
 };
@@ -150,15 +157,15 @@ const READ: ToolDef[] = [
   {
     name: "overview",
     description:
-      "Start here. Net worth, this month's spending against the typical month, the review queue size by reason, connection health and open alerts. Money is integer cents; negative is money out.",
+      "Start here. Net worth, this month's spending against the typical month and the budget, the review queue size by reason, connection health, charges due this week and open alerts. Money is integer cents; negative is money out.",
     inputSchema: object({}),
     readOnly: true,
     async run(ctx) {
       const o = await overview(ctx.read, today(ctx));
       const connections = await listConnections(ctx.read);
-      const alerts = await ctx.read.all<{ kind: string; message: string; created_at: string }>(
-        "SELECT kind, message, created_at FROM alerts WHERE dismissed_at IS NULL ORDER BY created_at DESC LIMIT 20",
-      );
+      const alerts = (await listAlerts(ctx.read, { limit: 20 })).map((x) => ({ id: x.id, kind: x.kind, date: x.date, message: x.message }));
+      const budget = await budgetStatus(ctx.read, o.month.month, o.today);
+      const upcoming = upcomingCharges(await listRecurring(ctx.read, o.today), o.today, 7);
       return {
         today: o.today,
         net_worth: o.net_worth,
@@ -167,6 +174,15 @@ const READ: ToolDef[] = [
         top_spending_categories_this_month: o.top_categories.map((c) => ({ id: c.category_id, name: c.name, total_cents: c.total_cents })),
         review_queue: o.review,
         connections: connections.map((c) => ({ institution: c.institution_name, status: c.status, last_synced_at: c.last_synced_at })),
+        budget_this_month: budget.lines.some((l) => l.budget_cents !== null)
+          ? {
+              available_cents: budget.totals.available_cents,
+              spent_in_budgeted_cents: budget.totals.budgeted_spent_cents,
+              expected_by_now_cents: budget.totals.expected_by_now_cents,
+              over: budget.lines.filter((l) => l.budget_cents !== null && l.spent_cents > l.available_cents).map((l) => l.name),
+            }
+          : null,
+        charges_due_next_7_days: upcoming.map((u) => ({ date: u.date, merchant: u.label, amount_cents: u.amount_cents })),
         open_alerts: alerts,
       };
     },
@@ -313,6 +329,74 @@ const READ: ToolDef[] = [
     inputSchema: object({}),
     readOnly: true,
     run: async (ctx) => syncStatus(ctx.read),
+  },
+  {
+    name: "budget_status",
+    description:
+      "Budgets for a month (default this month): per category the budget, any rollover carried from last month, spent (net of refunds, the same figure as spending_summary) and remaining, plus totals, spending in categories without a budget, and expected_by_now_cents (where spending would be at an even pace). elapsed is the share of the month gone.",
+    inputSchema: object({ month: { type: "string", pattern: "^\\d{4}-\\d{2}$", description: "YYYY-MM; default this month" } }),
+    readOnly: true,
+    async run(ctx, a) {
+      const month = str(a, "month") ?? monthOf(today(ctx));
+      if (!/^\d{4}-\d{2}$/.test(month)) throw new InvalidInput("month must look like 2026-11");
+      return budgetStatus(ctx.read, month, today(ctx));
+    },
+  },
+  {
+    name: "recurring_list",
+    description:
+      "Recurring charges found in the data (subscriptions and bills): cadence, latest amount (negative), the amount before a price increase, next expected date, whether it's late, status (active, ended, ignored) and yearly cost. Also the charges expected in the next `days` days (default 30). Give series_id to list one series' charges.",
+    inputSchema: object({
+      days: S.int("How far ahead to list upcoming charges, 1 to 90 (default 30)"),
+      include_ended: S.bool("Include ended and ignored series (default false)"),
+      series_id: S.text("List the charges of this series instead"),
+    }),
+    readOnly: true,
+    async run(ctx, a) {
+      const id = str(a, "series_id");
+      if (id) return { series_id: id, charges: await seriesCharges(ctx.read, id) };
+      const all = await listRecurring(ctx.read, today(ctx));
+      const days = Math.min(Math.max(int(a, "days") ?? 30, 1), 90);
+      const series = bool(a, "include_ended") ? all : all.filter((x) => x.status === "active");
+      const active = all.filter((x) => x.status === "active");
+      return {
+        today: today(ctx),
+        yearly_total_cents: active.reduce((n, x) => n + x.yearly_cents, 0),
+        series: series.map((x) => ({
+          id: x.id,
+          merchant: x.label,
+          account: x.account_mask ? `${x.account_name} ••${x.account_mask}` : x.account_name,
+          cadence: x.cadence,
+          amount_cents: x.amount_cents,
+          ...(x.previous_amount_cents !== null ? { previous_amount_cents: x.previous_amount_cents, price_changed_on: x.price_changed_on } : {}),
+          next_expected_date: x.next_expected_date,
+          ...(x.late ? { late: true } : {}),
+          status: x.status,
+          subscription: x.is_subscription === 1,
+          category: x.category_name,
+          charges: x.charge_count,
+          since: x.first_date,
+          yearly_cents: x.yearly_cents,
+        })),
+        upcoming: upcomingCharges(all, today(ctx), days),
+      };
+    },
+  },
+  {
+    name: "alerts_list",
+    description:
+      "Open alerts, newest first: possible duplicate charges, large charges, new merchants, fees, price increases, new subscriptions, missed recurring charges and connections needing a sign-in. Each has an id for dismiss_alert and, where it applies, the transaction_id or series_id it's about.",
+    inputSchema: object({ include_dismissed: S.bool("Include dismissed alerts (default false)") }),
+    readOnly: true,
+    run: async (ctx, a) => ({ alerts: await listAlerts(ctx.read, { includeDismissed: bool(a, "include_dismissed") ?? false }) }),
+  },
+  {
+    name: "weekly_digest",
+    description:
+      "The facts for a weekly review of the last 7 days, worked out the same way every time: spending by group against the 8-week weekly average, the largest charges, new merchants, open alerts, budget pace this month, the Review queue and charges due in the next 14 days. Narrate it; don't recompute it.",
+    inputSchema: object({}),
+    readOnly: true,
+    run: async (ctx) => weeklyDigest(ctx.read, today(ctx)),
   },
   {
     name: "run_sql",
@@ -532,6 +616,61 @@ const WRITE: ToolDef[] = [
         trigger: str(a, "trigger") === "manual" ? "manual" : "schedule",
         summary: str(a, "summary"),
       }),
+  },
+  {
+    name: "set_budget",
+    description:
+      "Set, change or remove a spending category's budget. month YYYY-MM sets that month only; leave month out to set the default for every month without its own amount. amount_cents null removes it. rollover carries what's left (or overspent) into the next month. Returns batch_id for undo.",
+    inputSchema: object(
+      {
+        category_id: S.text("A spending category id from list_categories"),
+        month: { type: "string", pattern: "^\\d{4}-\\d{2}$", description: "YYYY-MM; leave out for the default" },
+        amount_cents: { type: ["integer", "null"], description: "Budget in cents, zero or more; null removes it" },
+        rollover: S.bool("Carry the remainder into the next month"),
+      },
+      ["category_id", "amount_cents"],
+    ),
+    readOnly: false,
+    async run(ctx, a) {
+      const amount = a.amount_cents === null ? null : int(a, "amount_cents");
+      if (amount === undefined) throw new InvalidInput("amount_cents is required (null removes the budget)");
+      const r = await setBudget(
+        ctx.deps,
+        { category_id: str(a, "category_id", true)!, month: str(a, "month") ?? null, amount_cents: amount, rollover: bool(a, "rollover") },
+        { actor: "claude", tool: "set_budget" },
+      );
+      return { batch_id: r.change_ids.length ? r.batch_id : null, change_ids: r.change_ids, budget: r.budget };
+    },
+  },
+  {
+    name: "update_recurring",
+    description:
+      "Change a recurring series (ids from recurring_list): status ignored hides it and stops its alerts, ended says it was cancelled, active hands the status back to detection; is_subscription marks it a subscription or a bill. Detection never overrides what's set here. Returns batch_id for undo.",
+    inputSchema: object(
+      {
+        id: S.text("Series id"),
+        status: { type: "string", enum: ["active", "ended", "ignored"] },
+        is_subscription: S.bool("A subscription (true) or a bill (false)"),
+      },
+      ["id"],
+    ),
+    readOnly: false,
+    async run(ctx, a) {
+      const status = str(a, "status") as "active" | "ended" | "ignored" | undefined;
+      const r = await updateRecurring(ctx.deps, str(a, "id", true)!, { status, is_subscription: bool(a, "is_subscription") }, { actor: "claude" });
+      return { batch_id: r.change_ids.length ? r.batch_id : null, change_ids: r.change_ids };
+    },
+  },
+  {
+    name: "dismiss_alert",
+    description:
+      "Dismiss alerts by id (from alerts_list or overview) once the user has seen them or they're explained. A dismissed alert never comes back for the same reason. Don't dismiss a possible duplicate or a large charge the user hasn't confirmed. Returns batch_id for undo.",
+    inputSchema: object({ ids: S.ids("Alert ids") }, ["ids"]),
+    readOnly: false,
+    async run(ctx, a) {
+      const r = await dismissAlerts(ctx.deps, ids(a, "ids"), { actor: "claude" });
+      return { batch_id: r.change_ids.length ? r.batch_id : null, change_ids: r.change_ids, dismissed: r.dismissed };
+    },
   },
   {
     name: "undo",

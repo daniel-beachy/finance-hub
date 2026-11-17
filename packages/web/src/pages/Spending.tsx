@@ -47,6 +47,11 @@ function Period({ period, today, setPeriod }: { period: string; today: string; s
   return (
     <>
       <PageHeader title="Spending" sub={`${label}${period === current ? " so far" : ""}`}>
+        {!yearly && (
+          <Link to={`/budget?m=${period}`} className="btn">
+            Budget
+          </Link>
+        )}
         <div className="flex rounded-[7px] border border-line bg-panel p-0.5 text-[13px]">
           {(["Month", "Year"] as const).map((unit) => {
             const on = (unit === "Year") === yearly;

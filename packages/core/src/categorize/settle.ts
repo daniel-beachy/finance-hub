@@ -1,5 +1,7 @@
 import type { SqlDriver } from "../db/driver.ts";
 import type { CoreDeps } from "../deps.ts";
+import { refreshAlerts } from "../alerts.ts";
+import { refreshRecurring } from "../recurring.ts";
 import { refreshReviewQueue } from "../review.ts";
 import { UNCATEGORIZED } from "../seed/categories.ts";
 import { normalizeMerchant } from "./normalize.ts";
@@ -267,6 +269,10 @@ export interface SettleResult {
   changed: number;
   /** Transactions now waiting in Review. */
   queued: number;
+  /** Recurring series stored. */
+  recurring: number;
+  /** Open alerts. */
+  alerts: number;
 }
 
 export async function settle(deps: Pick<CoreDeps, "db" | "now" | "newId">): Promise<SettleResult> {
@@ -304,7 +310,10 @@ export async function settle(deps: Pick<CoreDeps, "db" | "now" | "newId">): Prom
          SELECT COUNT(*) FROM transactions t WHERE t.rule_id = rules.id AND t.removed_at IS NULL)`,
     );
     const queued = await refreshReviewQueue(db);
-    return { merchants_created, pairs_made: pairs.length, pairs_dissolved, changed, queued };
+    // Recurring series depend on categories (transfers are left out), and alerts on both.
+    const recurring = await refreshRecurring(deps);
+    const alerts = await refreshAlerts(deps);
+    return { merchants_created, pairs_made: pairs.length, pairs_dissolved, changed, queued, recurring, alerts };
   });
 }
 
