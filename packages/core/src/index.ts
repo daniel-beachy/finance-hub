@@ -38,3 +38,4 @@ export * from "./tax/federal.ts";
 export * from "./tax/params.ts";
 export * from "./tax/state.ts";
 export * from "./projections/retirement.ts";
+export * from "./tax/whatif.ts";
