@@ -119,3 +119,11 @@ The first time a file's account can't be matched by its last four digits, the Ac
 - The Fidelity parsers against real downloads. They follow Fidelity's published export columns; the NetBenefits columns are a best guess until a real file is checked.
 
 - Asking questions through Claude Code and Claude desktop on real data (the tools are tested, but not yet by Dan through Claude).
+
+- The tax and retirement engines (`packages/core/src/tax`, `packages/core/src/projections`) are built and tested but not wired to real data, a page or Claude yet, so nothing has been checked against Dan's own return. They produce estimates, not advice. In particular:
+  - The 2026 Form 1040 instructions were not published when the engine was written. It follows the 2025 worksheets line by line with the 2026 amounts, and its Tax Table method is checked against the published 2025 table.
+  - The 2026 Social Security wage base was read from IRS Publication 15, not from the Social Security Administration's own page, which refused automated requests.
+  - State income tax is not modeled for any state. The federal estimate says so on every result.
+  - The federal estimate leaves out the alternative minimum tax, all credits, self-employment and rental income, and more; the full list is `FEDERAL_TAX_SIMPLIFICATIONS` in `packages/core/src/tax/federal.ts` and comes with every result.
+  - The retirement projection leaves out required minimum distributions, Roth conversions, state tax and more, and taxes withdrawals approximately; the full list is `RETIREMENT_SIMPLIFICATIONS` in `packages/core/src/projections/retirement.ts`.
+  - The default return, volatility and inflation figures for retirement are round planning numbers chosen by the builder, not sourced.
