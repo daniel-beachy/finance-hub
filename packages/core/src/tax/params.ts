@@ -34,6 +34,8 @@ export interface TaxParams {
   supplementalWithholding: { rate: number; overMillionRate: number; millionThreshold: number };
   retirementPlans: { electiveDeferral: number; catchUp50: number; catchUp60to63: number; annualAdditions: number };
   hsa: { selfOnly: number; family: number };
+  earlyDistribution: { rate: number; age: number };
+  socialSecurityBenefits: { maxTaxableShare: number };
   unverified: string[];
 }
 

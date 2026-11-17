@@ -154,6 +154,19 @@
     "family": 8750
   },
 
+  "earlyDistribution": {
+    "source": "https://www.irs.gov/taxtopics/tc558",
+    "cite": "IRS Topic 558; IRC 72(t): additional tax on the taxable part of a distribution taken before this age. Used by the retirement projection only.",
+    "rate": 0.1,
+    "age": 59.5
+  },
+
+  "socialSecurityBenefits": {
+    "source": "https://www.irs.gov/publications/p915",
+    "cite": "IRS Publication 915, \"Maximum taxable part\": the largest share of benefits that can be taxable. The retirement projection taxes this share in every case, which overstates tax at low incomes.",
+    "maxTaxableShare": 0.85
+  },
+
   "unverified": [
     "The Social Security wage base was read from IRS Publication 15 (2026). The Social Security Administration's own page (https://www.ssa.gov/oact/cola/cbb.html) refused automated requests, so it was not read directly.",
     "The 2026 Form 1040 instructions (Tax Table, Tax Computation Worksheet, Qualified Dividends and Capital Gain Tax Worksheet) were not published when this file was written. The engine follows the 2025 worksheets line by line with the 2026 amounts above.",
